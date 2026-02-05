@@ -1,0 +1,94 @@
+/* Obsidian Logseqer Plugin Styles */
+
+/* Status Bar Item */
+.status-bar-item.logseqer-status-item {
+    font-size: var(--text-xs);
+    /* cursor: default; -- handled by obsidian */
+    /* display: inline-flex; -- handled by obsidian */
+    /* align-items: center; -- handled by obsidian */
+}
+
+.status-bar-item.logseqer-status-item.is-valid {
+    color: var(--text-success);
+}
+
+.status-bar-item.logseqer-status-item.is-invalid {
+    color: var(--text-error);
+}
+
+/* Sync Resolution Modal Styling */
+.logseqer-sync-section {
+    margin-bottom: 24px;
+}
+
+.logseqer-sync-header {
+    font-weight: bold;
+    margin-bottom: 8px;
+    display: block;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 0.8em;
+}
+
+.logseqer-sync-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background-color: var(--background-primary);
+}
+
+.logseqer-sync-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    min-height: 48px;
+}
+
+.logseqer-sync-item:last-child {
+    border-bottom: none;
+}
+
+.logseqer-sync-item-label {
+    flex: 1;
+    font-weight: 500;
+    margin-right: 15px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.logseqer-sync-item-control select {
+    width: 200px;
+    max-width: 100%;
+}
+
+/* Folder Suggest Dropdown */
+.suggestion-container {
+    position: absolute;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    margin-top: 2px;
+    min-width: 200px;
+}
+
+.suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background-color 0.1s;
+}
+
+.suggestion-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.suggestion-item:active {
+    background-color: var(--background-modifier-active-hover);
+}

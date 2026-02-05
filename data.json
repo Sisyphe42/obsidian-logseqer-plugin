@@ -1,0 +1,11 @@
+{
+  "ignoreVaultCheck": true,
+  "enableSyntaxCheck": true,
+  "enableJournalNew": true,
+  "enableBacklinkQuery": true,
+  "backlinkQueryString": "-path:\"journals/Journaling\"",
+  "logseqFolder": "logseq",
+  "obsidianFolder": ".obsidian",
+  "logseqConfigPath": "logseq/config.edn",
+  "obsidianBookmarksPath": ".obsidian/bookmarks.json"
+}
