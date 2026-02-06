@@ -55,9 +55,23 @@
     flex: 1;
     font-weight: 500;
     margin-right: 15px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow: visible;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.logseqer-sync-section {
+    margin-top: 12px;
+}
+
+.logseqer-sync-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.group-checkbox {
+    margin-left: 8px;
 }
 
 .logseqer-sync-item-control select {
@@ -67,7 +81,7 @@
 
 /* Folder Suggest Dropdown */
 .suggestion-container {
-    position: absolute;
+    position: fixed;
     max-height: 300px;
     overflow-y: auto;
     background: var(--background-primary);
@@ -91,4 +105,53 @@
 
 .suggestion-item:active {
     background-color: var(--background-modifier-active-hover);
+}
+
+/* Issue Type and Details */
+.logseqer-issue-type {
+    font-weight: bold;
+}
+
+.logseqer-issue-fix {
+    font-size: 0.9em;
+}
+
+.logseqer-issue-path {
+    color: var(--text-muted);
+}
+
+/* Modal footer/button layout for Vault Check and Sync modals */
+.modal-button-row, .modal-button-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+}
+
+.modal-button-left, .modal-button-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.modal-button-left {
+    flex: 1 1 auto;
+}
+
+.modal-button-right {
+    flex: 0 1 auto;
+}
+
+/* Buttons will be equalized in width by modal JS; provide sensible fallbacks */
+.modal-button-container button, .modal-button-row button {
+    min-width: 0;
+    padding: 6px 12px;
+    box-sizing: border-box;
+}
+
+/* Small screens: stack groups then individual buttons */
+@media (max-width: 520px) {
+    .modal-button-left, .modal-button-right { flex-basis: 100%; }
+    .modal-button-container button, .modal-button-row button { width: 100%; }
 }

@@ -7,17 +7,21 @@ An Obsidian plugin designed to provide a Logseq-native experience and enhance wo
 All features can be enabled/disabled individually in plugin settings for maximum customization.
 
 ### 1. Syntax Check
+
 Real-time validation showing if lines follow Logseq's `- ` format. Status shown in status bar.
 
 ### 2. Vault Compatibility Check
 
-Command to check date formats, journals/pages settings, namespace consistency, and task markers throughout the vault. 
-> Work in progress - needs verification and improvement
+Command to check date formats, journals/pages settings, namespace consistency, and task markers throughout the vault.
+
+> WIP: Needing more feedback and functionality. Having the potential to be the main feature if it works well.
 
 ### 3. Bookmark Sync
+
 Syncs Logseq favorites to Obsidian bookmarks. Handles duplicates and creates missing pages if needed with manual confirmation.
 
 ### 4. Journal Enhancements
+
 - Auto-formats new journal files
 - Customizable default backlinks query
 

@@ -1,33 +1,48 @@
-import { Plugin, ItemView, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile } from 'obsidian';
+import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, MarkdownRenderer, Component } from 'obsidian';
 
 // Interface for settings can be added here
 // Interface for settings
 interface LogseqerSettings {
-    ignoreVaultCheck: boolean;
     enableSyntaxCheck: boolean;
     enableJournalNew: boolean;
     enableBacklinkQuery: boolean;
     backlinkQueryString: string;
     logseqFolder: string; // Folder containing Logseq files
-    obsidianFolder: string; // Folder containing Obsidian config
+    developerMode?: boolean;
+    enableVaultCommand?: boolean;
+    enableSyncCommand?: boolean;
+    enableVaultDateCheck?: boolean;
+    enableVaultNamespaceCheck?: boolean;
+    enableVaultTaskMarkerCheck?: boolean;
+    enableVaultFolderSettingsCheck?: boolean;
+    bookmarkSyncDirection?: 'obsidian-to-logseq' | 'logseq-to-obsidian' | 'bidirectional'; // Bookmark sync direction
 }
 
 const DEFAULT_SETTINGS: LogseqerSettings = {
-    ignoreVaultCheck: false,
     enableSyntaxCheck: true,
     enableJournalNew: true,
     enableBacklinkQuery: true,
     backlinkQueryString: '-path:"journals/Journaling"',
     logseqFolder: 'logseq',
-    obsidianFolder: '.obsidian'
+    developerMode: false,
+    enableVaultCommand: true,
+    enableSyncCommand: true,
+    enableVaultDateCheck: true,
+    enableVaultNamespaceCheck: true,
+    enableVaultTaskMarkerCheck: true,
+    enableVaultFolderSettingsCheck: true,
+    bookmarkSyncDirection: 'obsidian-to-logseq', // Default: Obsidian to Logseq
 }
 
 export default class LogseqerPlugin extends Plugin {
     settings: LogseqerSettings;
     statusBarItem: HTMLElement;
+    devStatusBarItem: HTMLElement | null = null;
 
     async onload() {
         await this.loadSettings();
+
+        if (this.settings.developerMode) this.createDevButton();
 
         this.addSettingTab(new LogseqerSettingTab(this.app, this));
 
@@ -39,40 +54,44 @@ export default class LogseqerPlugin extends Plugin {
         // Register event for active leaf change
 
         this.registerEvent(this.app.workspace.on('active-leaf-change', (leaf) => {
-            this.updateSyntaxCheck();
-            this.updateBacklinkQuery(leaf);
+            void this.updateSyntaxCheck();
+            void this.updateBacklinkQuery(leaf);
         }));
 
         // Also trigger on file-open which might be cleaner for completely new files loading
         this.registerEvent(this.app.workspace.on('file-open', (file) => {
             // When file opens, the active leaf is relevant
-            this.updateBacklinkQuery();
+            void this.updateBacklinkQuery();
         }));
 
         // Register event for editor changes
         this.registerEvent(
             this.app.workspace.on('editor-change', (editor, info) => {
-                this.updateSyntaxCheck();
+                void this.updateSyntaxCheck();
             })
         );
 
-        // 2. Feature: Vault Check Command
-        this.addCommand({
-            id: 'logseqer-check-vault',
-            name: 'Check Vault Compatibility',
-            callback: () => {
-                this.runVaultCheckCommand();
-            }
-        });
+        // 2. Feature: Vault Check Command (register if enabled)
+        if (this.settings.enableVaultCommand) {
+            this.addCommand({
+                id: 'check-vault',
+                name: 'Check Vault Compatibility',
+                callback: () => {
+                    void this.runVaultCheckCommand();
+                }
+            });
+        }
 
-        // 3. Feature: Sync Settings Command
-        this.addCommand({
-            id: 'logseqer-sync-settings',
-            name: 'Sync Settings (Bookmarks/Favorites)',
-            callback: () => {
-                this.syncSettings();
-            }
-        });
+        // 3. Feature: Sync Settings Command (register if enabled)
+        if (this.settings.enableSyncCommand) {
+            this.addCommand({
+                id: 'sync-settings',
+                name: 'Sync Settings (Bookmarks/Favorites)',
+                callback: () => {
+                    void this.syncSettings();
+                }
+            });
+        }
 
         // 4. Feature: Journal
         // New Journal automatically add "- "
@@ -86,12 +105,16 @@ export default class LogseqerPlugin extends Plugin {
                 if (file instanceof TFile && file.path.startsWith(journalFolder + '/')) {
                     // Delay slightly to ensure file is ready?
                     // Read and modify
-                    await this.app.vault.process(file, (data) => {
-                        if (!data.startsWith("- ")) {
-                            return "- " + data;
-                        }
-                        return data;
-                    });
+                    try {
+                        await this.app.vault.process(file, (data) => {
+                            if (!data.startsWith("- ")) {
+                                return "- " + data;
+                            }
+                            return data;
+                        });
+                    } catch (e) {
+                        console.warn("Logseqer: Failed to process journal file", e);
+                    }
                 }
             })
         );
@@ -112,8 +135,7 @@ export default class LogseqerPlugin extends Plugin {
     // Helper: Get Daily Notes Folder from Internal Plugin
     getDailyNoteFolder(): string {
         try {
-            // @ts-ignore
-            const dailyNotesPlugin = this.app.internalPlugins.getPluginById('daily-notes');
+            const dailyNotesPlugin = (this.app as any).internalPlugins.getPluginById('daily-notes');
             if (dailyNotesPlugin && dailyNotesPlugin.instance && dailyNotesPlugin.instance.options) {
                 return dailyNotesPlugin.instance.options.folder || 'journals';
             }
@@ -123,77 +145,334 @@ export default class LogseqerPlugin extends Plugin {
         return 'journals';
     }
 
-    // 2. Feature: Vault Check
-    async checkVault() {
-        if (this.settings.ignoreVaultCheck) return;
+    // Helper: Determine pages folder - prefer a folder named 'pages' if present
+    getPagesFolder(): string {
+        try {
+            const folders = this.app.vault.getAllLoadedFiles().filter((f: TAbstractFile) => f instanceof TFolder).map((f: TAbstractFile) => f.path);
+            // Prefer exact 'pages' at root
+            if (folders.includes('pages')) return 'pages';
+            // Prefer any top-level folder named pages/... (startsWith)
+            const pagesLike = folders.find(p => p === 'pages' || p.startsWith('pages/'));
+            if (pagesLike) return 'pages';
+        } catch (e) {
+            console.warn('Logseqer: failed determining pages folder from vault', e);
+        }
+        // Default fallback used by Logseq
+        return 'pages';
+    }
 
-        // Notify user about the check
-        new Notice("Logseqer: It is recommended to run 'Check Vault Compatibility' command once to ensure smooth interoperability.");
+    // 2. Feature: Vault Check helper (manual only)
+    checkVault() {
+        // Manual only - no startup behavior
+        new Notice("Run 'Check Vault Compatibility' from the command palette to inspect vault.");
     }
 
     async runVaultCheckCommand() {
-        new Notice("Vault Check started...");
-        console.log("Logseqer: Starting Vault Check...");
+        console.warn("Logseqer: Starting Vault Check...");
 
+        new Notice("Vault Check started...");
+
+        const adapter = this.app.vault.adapter;
         const files = this.app.vault.getMarkdownFiles();
-        const journalFolder = this.getDailyNoteFolder();
         const issues: VaultCheckIssue[] = [];
 
-        // Basic Regex for dates like 2024_01_01, 2024-01-01, etc.
-        const dateLikeRegex = /^(\d{4}[-_]\d{2}[-_]\d{2})$/;
+        // Determine expected folders (Logseq cannot change paths here)
+        const journalFolder = this.getDailyNoteFolder();
+        const pagesFolder = this.getPagesFolder();
+
+        // 0. Settings check: compare Obsidian settings against Logseq expectations
+        if (this.settings.enableVaultFolderSettingsCheck) {
+            try {
+                const cfgDir = this.app.vault.configDir;
+                const adapter = this.app.vault.adapter;
+
+                // First, read Logseq config for date format to compare with Obsidian
+                let logseqDateFormat = 'yyyy-MM-dd';
+                try {
+                    const configPath = `${this.settings.logseqFolder}/config.edn`;
+                    if (await adapter.exists(configPath)) {
+                        const cfg = await adapter.read(configPath);
+                        // Filter out comment lines (starting with ";;") and extract valid code lines
+                        // Handle different line endings: \n (Unix), \r\n (Windows), \r (old Mac)
+                        const lines = cfg.split(/\r?\n|\r/);
+                        const validLines = lines
+                            .map(line => line.trim())
+                            .filter(line => line && !line.startsWith(';;')); // Remove empty lines and comments
+                        const codeText = validLines.join('\n');
+                        // Match :journal/page-title-format "format" pattern
+                        const m = codeText.match(/:journal\/page-title-format\s+"([^"]+)"/);
+                        if (m) logseqDateFormat = m[1];
+                    }
+                } catch (e) {
+                    console.warn('Logseqer: failed reading Logseq config.edn for date format', e);
+                }
+
+                // Convert Logseq format (yyyy-MM-dd) to Obsidian format (YYYY-MM-DD)
+                const expectedObsDailyFormat = logseqDateFormat
+                    .replace(/yyyy/g, 'YYYY')
+                    .replace(/MM/g, 'MM')
+                    .replace(/dd/g, 'DD')
+                    .replace(/_/g, '-');
+
+                // Read Obsidian daily notes settings (internal plugin preferred)
+                let obsDailyFormat: string | null = null;
+                let obsDailyFolder: string | null = null;
+                try {
+                    const dnPlugin = (this.app as any).internalPlugins?.getPluginById?.('daily-notes');
+                    if (dnPlugin && dnPlugin.instance && dnPlugin.instance.options) {
+                        obsDailyFormat = dnPlugin.instance.options.format;
+                        obsDailyFolder = dnPlugin.instance.options.folder || 'journals';
+                    }
+                } catch (e) {
+                    // ignore
+                }
+
+                // Fallback to config files in .obsidian
+                if (!obsDailyFormat || !obsDailyFolder) {
+                    const dailyPath = `${cfgDir}/daily-notes.json`;
+                    if (await adapter.exists(dailyPath)) {
+                        const txt = await adapter.read(dailyPath);
+                        try {
+                            const j = JSON.parse(txt);
+                            obsDailyFormat = obsDailyFormat || j.format || null;
+                            obsDailyFolder = obsDailyFolder || j.folder || null;
+                        } catch (e) {}
+                    }
+                }
+
+                // Read app.json for newFileLocation/newFileFolderPath
+                let appNewFileLocation: string | null = null;
+                let appNewFileFolderPath: string | null = null;
+                const appPath = `${cfgDir}/app.json`;
+                if (await adapter.exists(appPath)) {
+                    try {
+                        const txt = await adapter.read(appPath);
+                        const j = JSON.parse(txt);
+                        appNewFileLocation = j.newFileLocation || null;
+                        appNewFileFolderPath = j.newFileFolderPath || null;
+                    } catch (e) {}
+                }
+
+                // Expected values for Logseq compatibility
+                const expectedJournalFolder = 'journals';
+                const expectedPagesFolder = 'pages';
+                const expectedNewFileLocation = 'folder';
+
+                // 1. Check newFileFolderPath
+                if (appNewFileFolderPath !== expectedPagesFolder) {
+                    issues.push({
+                        type: 'Settings',
+                        description: `Obsidian new file folder path is '${appNewFileFolderPath || '(not set)'}', expected '${expectedPagesFolder}'.`,
+                        suggestedFix: `Set Obsidian new file folder to '${expectedPagesFolder}'.`,
+                        fixData: { type: 'settings-update', target: 'app.json', key: 'newFileFolderPath', value: expectedPagesFolder }
+                    });
+                }
+
+                // 2. Check newFileLocation
+                if (appNewFileLocation !== expectedNewFileLocation) {
+                    issues.push({
+                        type: 'Settings',
+                        description: `Obsidian new file location is '${appNewFileLocation || '(not set)'}', expected '${expectedNewFileLocation}'.`,
+                        suggestedFix: `Set Obsidian new file location to '${expectedNewFileLocation}'.`,
+                        fixData: { type: 'settings-update', target: 'app.json', key: 'newFileLocation', value: expectedNewFileLocation }
+                    });
+                }
+
+                // 3. Check daily notes folder
+                if (obsDailyFolder !== expectedJournalFolder) {
+                    issues.push({
+                        type: 'Settings',
+                        description: `Obsidian daily notes folder is '${obsDailyFolder || '(not set)'}', expected '${expectedJournalFolder}'.`,
+                        suggestedFix: `Set Obsidian daily notes folder to '${expectedJournalFolder}'.`,
+                        fixData: { type: 'settings-update', target: 'daily-notes.json', key: 'folder', value: expectedJournalFolder }
+                    });
+                }
+
+                // 4. Check daily notes format (from Logseq config)
+                if (obsDailyFormat !== expectedObsDailyFormat) {
+                    issues.push({
+                        type: 'Settings',
+                        description: `Obsidian daily notes format is '${obsDailyFormat || '(not set)'}', expected '${expectedObsDailyFormat}' (from Logseq config: ${logseqDateFormat}).`,
+                        suggestedFix: `Set Obsidian daily notes format to '${expectedObsDailyFormat}'.`,
+                        fixData: { type: 'settings-update', target: 'daily-notes.json', key: 'format', value: expectedObsDailyFormat }
+                    });
+                }
+            } catch (e) {
+                console.warn('Logseqer: folder settings check failed', e);
+            }
+        }
+
+        // Note: Date format check is now handled in Settings check above (comparing config files)
+        // The old file-by-file date format check has been removed as it's not needed.
+        // Vault Check should only compare configuration files, not individual journal files.
 
         for (const file of files) {
             const fileName = file.basename;
 
-            // 1. Date Format Check
-            if (file.path.startsWith(journalFolder + '/')) {
-                if (!dateLikeRegex.test(fileName)) {
-                    issues.push({
-                        file,
-                        type: 'Date',
-                        description: `Journal file "${file.path}" does not match YYYY-MM-DD or YYYY_MM_DD.`,
-                        suggestedFix: "No automatic fix available (Manual Rename recommended).",
-                        fixData: null
-                    });
+            // 2. Namespace check: check for files with "___" separator (e.g., "a___b___c.md")
+            // Rule: Convert "a___b___c.md" to "c.md" and add "tags: a/b" at the beginning
+            if (file.path.startsWith(pagesFolder + '/')) {
+                if (this.settings.enableVaultNamespaceCheck && fileName.includes('___') && !fileName.startsWith('.')) {
+                    // Extract namespace parts (e.g., "a___b___c" -> ["a", "b", "c"])
+                    const parts = fileName.replace(/\.md$/, '').split('___');
+                    if (parts.length > 1) {
+                        const finalName = parts[parts.length - 1]; // Last part is the actual filename
+                        const namespaceParts = parts.slice(0, -1); // All parts except the last
+                        const namespacePath = namespaceParts.join('/'); // e.g., "a/b"
+                        const newPath = `${pagesFolder}/${finalName}.md`;
+                        
+                        issues.push({
+                            file,
+                            type: 'Namespace',
+                            description: `File "${file.path}" uses namespace separator "___".`,
+                            suggestedFix: `Rename to "${newPath}" and add "tags: ${namespacePath}" at the beginning of the file.`,
+                            fixData: { 
+                                type: 'namespace-rename', 
+                                newPath,
+                                namespacePath,
+                                originalName: fileName
+                            }
+                        });
+                    }
                 }
             }
 
-            // 2. Namespace check
-            if (fileName.includes('.') && !fileName.startsWith('.')) {
-                const newPath = file.path.replace(fileName, fileName.replace(/\./g, '/'));
-                issues.push({
-                    file,
-                    type: 'Namespace',
-                    description: `File "${file.path}" contains dots in the name (Logseq style hierarchy).`,
-                    suggestedFix: `Convert to Obsidian folders: "${newPath}"`,
-                    fixData: { type: 'rename', newPath }
-                });
-            }
-
-            // 3. Task marker conversion
-            const content = await this.app.vault.read(file);
-            if (content.includes("TODO ") || content.includes("DOING ")) {
-                issues.push({
-                    file,
-                    type: 'Task Marker',
-                    description: `File "${file.path}" contains Logseq task markers (TODO/DOING).`,
-                    suggestedFix: "Convert Logseq markers to Obsidian tasks (- [ ]).",
-                    fixData: { type: 'content-replace', content }
-                });
+            // 3. Task marker detection: detect common Logseq markers
+            // Logseq task markers typically appear at the start of a line, optionally with "- " prefix
+            // Examples: "TODO", "- TODO", "DONE", "- DONE", etc.
+            if (this.settings.enableVaultTaskMarkerCheck) {
+                try {
+                    const content = await this.app.vault.read(file);
+                    // Match Logseq task markers: word boundary + marker + optional colon
+                    // Pattern matches: TODO, DONE, DOING, NOW, LATER (with word boundaries)
+                    const markerRegex = /\b(TODO|DONE|DOING|NOW|LATER)\b/;
+                    if (markerRegex.test(content)) {
+                        issues.push({
+                            file,
+                            type: 'Task Marker',
+                            description: `File "${file.path}" contains Logseq task markers (TODO/DONE/DOING/NOW/LATER).`,
+                            suggestedFix: 'Convert Logseq task markers to markdown tasks (- [ ] / - [x]).',
+                            fixData: { type: 'content-replace', content }
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Logseqer: failed reading file for markers', file.path, e);
+                }
             }
         }
 
         if (issues.length > 0) {
             new VaultCheckResolutionModal(this.app, this, issues).open();
         } else {
-            new Notice("Vault Check completed. No issues found!");
+            // Show a modal that requires manual close to indicate success
+            const modal = new Modal(this.app);
+            modal.titleEl.setText('Vault Check');
+            modal.contentEl.createEl('p', { text: 'Vault Check completed. No issues found.' });
+            const btn = modal.contentEl.createEl('button', { text: 'Close', cls: 'mod-cta' });
+            btn.onclick = () => modal.close();
+            modal.open();
         }
     }
 
+    // Simulation: open Vault Check modal with sample issues (no file changes performed)
+    async runVaultCheckSimulation() {
+        const sampleFile1 = { path: 'pages/example/nestedPage.md', basename: 'nestedPage' } as unknown as TFile;
+        const sampleFile2 = { path: 'journals/2024-02-30.md', basename: '2024-02-30' } as unknown as TFile;
+        const sampleFile3 = { path: 'pages/task-example.md', basename: 'task-example' } as unknown as TFile;
+
+        const issues: VaultCheckIssue[] = [
+            {
+                file: sampleFile1,
+                type: 'Namespace',
+                description: `File "${sampleFile1.path}" appears to use nested folders under pages/.`,
+                suggestedFix: `Convert to namespace (dots): "pages/example.nestedPage.md"`,
+                fixData: { type: 'rename', newPath: 'pages/example.nestedPage.md' }
+            },
+            {
+                file: sampleFile2,
+                type: 'Date',
+                description: `Journal file "${sampleFile2.path}" does not match configured date format (yyyy-MM-dd).`,
+                suggestedFix: 'Manual rename recommended.',
+                fixData: null
+            },
+            {
+                file: sampleFile3,
+                type: 'Task Marker',
+                description: `File "${sampleFile3.path}" contains Logseq task markers (TODO).`,
+                suggestedFix: 'Convert Logseq task markers to markdown tasks (- [ ] / - [x]).',
+                fixData: { type: 'content-replace', content: '- TODO sample task' }
+            }
+        ];
+
+        // Open the modal in simulation mode so Apply button does not perform real changes
+        new VaultCheckResolutionModal(this.app, this, issues, true).open();
+    }
     // 3. Feature: Settings Sync
     async syncSettings() {
         const adapter = this.app.vault.adapter;
-        const bookmarkPath = `${this.settings.obsidianFolder}/bookmarks.json`;
+        const bookmarkPath = `${this.app.vault.configDir}/bookmarks.json`;
+        const logseqConfigPath = `${this.settings.logseqFolder}/config.edn`;
+
+        if (!(await adapter.exists(bookmarkPath))) {
+            new Notice(`Obsidian bookmarks not found at ${bookmarkPath}`);
+            return;
+        }
+
+        if (!(await adapter.exists(logseqConfigPath))) {
+            new Notice(`Logseq config not found at ${logseqConfigPath}`);
+            return;
+        }
+
+        try {
+            // Read Obsidian bookmarks
+            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath));
+            const bookmarkedFiles = bookmarkContent.items
+                .filter((item: any) => item.type === 'file')
+                .map((item: any) => item.path);
+            
+            const obsidianPageNames = new Set<string>();
+            for (const filePath of bookmarkedFiles) {
+                const file = this.app.vault.getAbstractFileByPath(filePath);
+                if (file instanceof TFile) {
+                    obsidianPageNames.add(file.basename);
+                }
+            }
+
+            // Read Logseq favorites
+            const configContent = await adapter.read(logseqConfigPath);
+            const favoritesRegex = /:favorites\s*\[([^\]]*)\]/;
+            const match = configContent.match(favoritesRegex);
+            const logseqPageNames = match ? new Set(match[1].match(/"([^"]+)"/g)?.map(s => s.replace(/"/g, '')) || []) : new Set<string>();
+
+            // Determine sync direction
+            const direction = this.settings.bookmarkSyncDirection || 'obsidian-to-logseq';
+            const isBidirectional = direction === 'bidirectional';
+            const canModifyObsidian = isBidirectional || direction === 'logseq-to-obsidian';
+            const canModifyLogseq = isBidirectional || direction === 'obsidian-to-logseq';
+
+            // Open the sync modal
+            new BookmarkSyncModal(
+                this.app,
+                this,
+                Array.from(obsidianPageNames).sort(),
+                Array.from(logseqPageNames).sort(),
+                bookmarkPath,
+                logseqConfigPath,
+                canModifyObsidian,
+                canModifyLogseq,
+                direction
+            ).open();
+
+        } catch (e) {
+            console.error("Logseqer: Error preparing bookmark sync", e);
+            new Notice("Error preparing bookmark sync. See console.");
+        }
+    }
+
+    // Sync from Logseq favorites to Obsidian bookmarks
+    async syncLogseqToObsidian() {
+        const adapter = this.app.vault.adapter;
+        const bookmarkPath = `${this.app.vault.configDir}/bookmarks.json`;
         const logseqConfigPath = `${this.settings.logseqFolder}/config.edn`;
 
         if (!(await adapter.exists(logseqConfigPath))) {
@@ -224,7 +503,7 @@ export default class LogseqerPlugin extends Plugin {
                 return;
             }
 
-            // 5. Build Map of all markdown files: Basename -> TFile[]
+            // Build Map of all markdown files: Basename -> TFile[]
             const allFiles = this.app.vault.getMarkdownFiles();
             const fileMap = new Map<string, TFile[]>();
 
@@ -235,16 +514,13 @@ export default class LogseqerPlugin extends Plugin {
                 fileMap.get(file.basename)?.push(file);
             }
 
-            // 6. Categorize Pages
+            // Categorize Pages
             const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath));
             const existingPaths = new Set(bookmarkContent.items.map((item: any) => item.path));
 
             let addedDirectlyCount = 0;
             const missingPages: string[] = [];
             const ambiguousPages: { name: string; files: TFile[] }[] = [];
-
-            // Helper for fallback checks
-            const journalFolder = this.getDailyNoteFolder();
 
             for (const pageName of pages) {
                 const matches = fileMap.get(pageName) || [];
@@ -273,7 +549,7 @@ export default class LogseqerPlugin extends Plugin {
 
             if (addedDirectlyCount > 0) {
                 await adapter.write(bookmarkPath, JSON.stringify(bookmarkContent, null, 2));
-                new Notice(`Synced ${addedDirectlyCount} unique favorites.`);
+                new Notice(`Synced ${addedDirectlyCount} favorites from Logseq to Obsidian.`);
             }
 
             if (missingPages.length > 0 || ambiguousPages.length > 0) {
@@ -289,14 +565,110 @@ export default class LogseqerPlugin extends Plugin {
             }
 
         } catch (e) {
-            console.error(e);
-            new Notice("Error syncing settings. See console.");
+            console.error("Logseqer: Error syncing from Logseq to Obsidian", e);
+            new Notice("Error syncing from Logseq to Obsidian. See console.");
+        }
+    }
+
+    // Sync from Obsidian bookmarks to Logseq favorites
+    async syncObsidianToLogseq() {
+        const adapter = this.app.vault.adapter;
+        const bookmarkPath = `${this.app.vault.configDir}/bookmarks.json`;
+        const logseqConfigPath = `${this.settings.logseqFolder}/config.edn`;
+
+        if (!(await adapter.exists(bookmarkPath))) {
+            new Notice(`Obsidian bookmarks not found at ${bookmarkPath}`);
+            return;
+        }
+
+        if (!(await adapter.exists(logseqConfigPath))) {
+            new Notice(`Logseq config not found at ${logseqConfigPath}`);
+            return;
+        }
+
+        try {
+            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath));
+            const bookmarkedFiles = bookmarkContent.items
+                .filter((item: any) => item.type === 'file')
+                .map((item: any) => item.path);
+
+            if (bookmarkedFiles.length === 0) {
+                new Notice("No bookmarks found in Obsidian.");
+                return;
+            }
+
+            // Extract page names from file paths (basename without .md)
+            const pageNames = new Set<string>();
+            for (const filePath of bookmarkedFiles) {
+                const file = this.app.vault.getAbstractFileByPath(filePath);
+                if (file instanceof TFile) {
+                    pageNames.add(file.basename);
+                }
+            }
+
+            // Read Logseq config to check existing favorites
+            let configContent = await adapter.read(logseqConfigPath);
+            const favoritesRegex = /:favorites\s*\[([^\]]*)\]/;
+            const match = configContent.match(favoritesRegex);
+            const existingFavorites = match ? match[1].match(/"([^"]+)"/g)?.map(s => s.replace(/"/g, '')) || [] : [];
+            
+            // Merge page names with existing favorites (only add new ones)
+            const pageNamesArray = Array.from(pageNames);
+            const allFavorites = new Set<string>([...existingFavorites, ...pageNamesArray]);
+            const newFavorites = pageNamesArray.filter(name => !existingFavorites.includes(name));
+            
+            if (newFavorites.length === 0) {
+                new Notice("All bookmarks are already in Logseq favorites.");
+                return;
+            }
+            
+            // Show confirmation modal with page list
+            const sortedNewFavorites = newFavorites.sort();
+            const message = `Add ${sortedNewFavorites.length} new bookmarks from Obsidian to Logseq?\n\n` +
+                `New pages to add:\n${sortedNewFavorites.slice(0, 20).join(', ')}${sortedNewFavorites.length > 20 ? `\n... and ${sortedNewFavorites.length - 20} more` : ''}\n\n` +
+                (existingFavorites.length > 0 ? `Note: ${existingFavorites.length} existing favorites will be preserved.` : '');
+            
+            new CustomConfirmationModal(this.app, message, async () => {
+                try {
+                    // Re-read config to ensure we have the latest content
+                    let currentConfigContent = await adapter.read(logseqConfigPath);
+                    const currentMatch = currentConfigContent.match(favoritesRegex);
+                    
+                    // Merge with existing favorites (preserve all existing, add new ones)
+                    const currentExisting = currentMatch ? currentMatch[1].match(/"([^"]+)"/g)?.map(s => s.replace(/"/g, '')) || [] : [];
+                    const mergedFavorites = new Set<string>([...currentExisting, ...pageNamesArray]);
+                    const sortedMergedFavorites = Array.from(mergedFavorites).sort();
+                    const favoritesArray = sortedMergedFavorites.map(name => `"${name}"`).join(' ');
+                    
+                    if (currentMatch) {
+                        // Replace existing :favorites with merged list
+                        currentConfigContent = currentConfigContent.replace(favoritesRegex, `:favorites [${favoritesArray}]`);
+                    } else {
+                        // Add :favorites if not exists (add before closing brace or at end)
+                        if (currentConfigContent.trim().endsWith('}')) {
+                            currentConfigContent = currentConfigContent.slice(0, -1) + ` :favorites [${favoritesArray}]\n}`;
+                        } else {
+                            currentConfigContent += `\n:favorites [${favoritesArray}]`;
+                        }
+                    }
+
+                    await adapter.write(logseqConfigPath, currentConfigContent);
+                    new Notice(`Added ${sortedNewFavorites.length} new bookmarks to Logseq favorites (${existingFavorites.length} existing preserved).`);
+                } catch (e) {
+                    console.error("Logseqer: Error syncing from Obsidian to Logseq", e);
+                    new Notice("Error syncing from Obsidian to Logseq. See console.");
+                }
+            }).open();
+
+        } catch (e) {
+            console.error("Logseqer: Error syncing from Obsidian to Logseq", e);
+            new Notice("Error syncing from Obsidian to Logseq. See console.");
         }
     }
 
     // 4. Feature: Backlinks Customization
     // Custom "journals/*" backlinks default query (now uses dynamic folder)
-    async updateBacklinkQuery(leaf?: WorkspaceLeaf | null) {
+    updateBacklinkQuery(leaf?: WorkspaceLeaf | null) {
         if (!this.settings.enableBacklinkQuery) return;
 
         // If no leaf provided (e.g. file-open), get the active one
@@ -314,9 +686,8 @@ export default class LogseqerPlugin extends Plugin {
             const maxRetries = 10;
             const retryInterval = 100;
 
-            const tryInject = async (attempt: number) => {
+            const tryInject = (attempt: number) => {
                 // Ensure element is connected (user hasn't closed tab)
-                // @ts-ignore
                 if (view.containerEl && !view.containerEl.isConnected) return;
 
                 // Scoped selector within the specific view container
@@ -392,6 +763,111 @@ export default class LogseqerPlugin extends Plugin {
         }
         this.statusBarItem.title = "LS Syntax Check";
     }
+
+    createDevButton() {
+        if (this.devStatusBarItem) return;
+        this.devStatusBarItem = this.addStatusBarItem();
+        this.devStatusBarItem.addClass('logseqer-dev-item');
+        this.devStatusBarItem.setText('Dev');
+        this.devStatusBarItem.onclick = () => {
+            new DeveloperModal(this.app, this).open();
+        };
+    }
+
+    removeDevButton() {
+        if (!this.devStatusBarItem) return;
+        this.devStatusBarItem.remove();
+        this.devStatusBarItem = null;
+    }
+}
+
+// Custom Confirmation Modal
+class CustomConfirmationModal extends Modal {
+    onConfirm: () => void;
+    message: string;
+
+    constructor(app: App, message: string, onConfirm: () => void) {
+        super(app);
+        this.message = message;
+        this.onConfirm = onConfirm;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('p', { text: this.message });
+        
+        const btnDiv = contentEl.createDiv({ cls: 'modal-button-container' });
+        const confirmBtn = btnDiv.createEl('button', { text: 'Confirm', cls: 'mod-cta' });
+        confirmBtn.onclick = () => {
+            this.onConfirm();
+            this.close();
+        };
+
+        const cancelBtn = btnDiv.createEl('button', { text: 'Cancel' });
+        cancelBtn.onclick = () => this.close();
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
+class DeveloperModal extends Modal {
+    plugin: LogseqerPlugin;
+    constructor(app: App, plugin: LogseqerPlugin) {
+        super(app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h3', { text: 'Developer Tools' });
+        contentEl.createEl('p', { text: 'Use these controls to show test notifications and dialogs that users see.' });
+
+        const btn1 = contentEl.createEl('button', { text: 'Show Test Notice' });
+        btn1.onclick = () => {
+            new Notice('This is a test notice from Developer Mode.');
+        };
+
+        const btn2 = contentEl.createEl('button', { text: 'Vault Check with Issues' });
+        btn2.onclick = () => {
+            // Open a dry-run simulation of the Vault Check UI (no real file changes)
+            void this.plugin.runVaultCheckSimulation();
+        };
+
+        const btn2b = contentEl.createEl('button', { text: 'Vault Check with No Issues' });
+        btn2b.onclick = () => {
+            // Show the success modal that indicates no issues found
+            const modal = new Modal(this.app);
+            modal.titleEl.setText('Vault Check');
+            modal.contentEl.createEl('p', { text: 'Vault Check completed. No issues found.' });
+            const btn = modal.contentEl.createEl('button', { text: 'Close', cls: 'mod-cta' });
+            btn.onclick = () => modal.close();
+            modal.open();
+        };
+
+        const btn3 = contentEl.createEl('button', { text: 'Sync Resolution' });
+        btn3.onclick = () => {
+            // Provide sample data for ambiguous/missing pages (dry-run)
+            const missing = ['Sample Page A', 'New Page B'];
+            const ambiguous = [
+                { name: 'DuplicatePage', files: [{ path: 'pages/DuplicatePage.md' } as unknown as TFile, { path: 'pages/sub/DuplicatePage.md' } as unknown as TFile] }
+            ];
+            new SyncResolutionModal(this.app, this.plugin, missing, ambiguous, `${this.plugin.app.vault.configDir}/bookmarks.json`, true).open();
+        };
+
+        const del = contentEl.createEl('button', { text: 'Remove Dev Button' });
+        del.onclick = async () => {
+            this.plugin.removeDevButton();
+            this.close();
+            this.plugin.settings.developerMode = false;
+            await this.plugin.saveSettings();
+        };
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
 }
 
 // Folder Suggest Component for Settings
@@ -441,10 +917,11 @@ class FolderSuggest {
             this.suggestEl = createDiv({ cls: 'suggestion-container' });
             // Position relative to input element
             const rect = this.inputEl.getBoundingClientRect();
-            this.suggestEl.style.position = 'fixed';
-            this.suggestEl.style.left = `${rect.left}px`;
-            this.suggestEl.style.top = `${rect.bottom}px`;
-            this.suggestEl.style.width = `${rect.width}px`;
+            this.suggestEl.setCssProps({
+                left: `${rect.left}px`,
+                top: `${rect.bottom}px`,
+                width: `${rect.width}px`
+            });
             document.body.appendChild(this.suggestEl);
         }
 
@@ -482,7 +959,7 @@ class LogseqerSettingTab extends PluginSettingTab {
         containerEl.createEl('h2', { text: 'Logseqer Plugin Settings' });
 
         new Setting(containerEl)
-            .setName('Enable Syntax Check')
+            .setName('Syntax Check')
             .setDesc('Show syntax check status in status bar.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableSyntaxCheck)
@@ -493,7 +970,7 @@ class LogseqerSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Enable New Journal Format')
+            .setName('New Journal Format')
             .setDesc('Automatically prepend "- " to new journal files.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableJournalNew)
@@ -502,17 +979,102 @@ class LogseqerSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        containerEl.createEl('h3', { text: 'Vault & Sync' });
+        containerEl.createEl('h3', { text: 'Vault Check' });
 
-        new Setting(containerEl)
-            .setName('Ignore Vault Check on Startup')
-            .setDesc('Correct vault check warnings.')
+        // Parent: Vault Check command with collapsible subfeatures
+        const vaultParent = new Setting(containerEl)
+            .setName('Vault Check')
+            .setDesc('Show the "Check Vault Compatibility" command in the command palette.')
             .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.ignoreVaultCheck)
+                .setValue(this.plugin.settings.enableVaultCommand ?? true)
                 .onChange(async (value) => {
-                    this.plugin.settings.ignoreVaultCheck = value;
+                    this.plugin.settings.enableVaultCommand = value;
+                    await this.plugin.saveSettings();
+                    this.display();
+                }));
+
+        // Sub-features container (collapsible)
+        const vaultSubContainer = containerEl.createDiv({ cls: 'vault-subfeatures' });
+        const parentEnabled = !!(this.plugin.settings.enableVaultCommand);
+        vaultSubContainer.style.display = parentEnabled ? '' : 'none';
+
+        // Date format check (reads Logseq :journal/page-title-format from config.edn)
+        new Setting(vaultSubContainer)
+            .setName('Date Format Check')
+            .setDesc('Read Logseq config.edn for :journal/page-title-format and compare with Obsidian daily note format.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableVaultDateCheck ?? true)
+                .setDisabled(!parentEnabled)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableVaultDateCheck = value;
                     await this.plugin.saveSettings();
                 }));
+
+        // Folder settings check (journals/pages mappings)
+        new Setting(vaultSubContainer)
+            .setName('Folder Settings Check')
+            .setDesc('Verify Obsidian daily notes and new-file folder settings match Logseq expectations (journals/pages).')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableVaultFolderSettingsCheck ?? true)
+                .setDisabled(!parentEnabled)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableVaultFolderSettingsCheck = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        // Namespace check
+        new Setting(vaultSubContainer)
+            .setName('Namespace Checks')
+            .setDesc('Detect files with "___" separator (e.g., "a___b___c.md") and convert to "c.md" with "tags: a/b" at the beginning.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableVaultNamespaceCheck ?? true)
+                .setDisabled(!parentEnabled)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableVaultNamespaceCheck = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        // Task marker check
+        new Setting(vaultSubContainer)
+            .setName('Task Marker Checks')
+            .setDesc('Detect common Logseq task markers (TODO/DONE/DOING/etc.).')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableVaultTaskMarkerCheck ?? true)
+                .setDisabled(!parentEnabled)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableVaultTaskMarkerCheck = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        containerEl.createEl('h3', { text: 'Bookmark Sync' });
+
+        // Sync command toggle
+        new Setting(containerEl)
+            .setName('Sync Settings')
+            .setDesc('Show the "Sync Settings" command in the command palette.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableSyncCommand ?? true)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableSyncCommand = value;
+                    await this.plugin.saveSettings();
+                    this.display();
+                }));
+
+        // Sync direction setting
+        new Setting(containerEl)
+            .setName('Sync Direction')
+            .setDesc('Choose the direction for bookmark synchronization.')
+            .addDropdown(dropdown => {
+                dropdown
+                    .addOption('obsidian-to-logseq', 'Obsidian → Logseq')
+                    .addOption('logseq-to-obsidian', 'Logseq → Obsidian')
+                    .addOption('bidirectional', 'Bidirectional (Both ways)')
+                    .setValue(this.plugin.settings.bookmarkSyncDirection || 'obsidian-to-logseq')
+                    .onChange(async (value: 'obsidian-to-logseq' | 'logseq-to-obsidian' | 'bidirectional') => {
+                        this.plugin.settings.bookmarkSyncDirection = value;
+                        await this.plugin.saveSettings();
+                    });
+            });
 
         // Logseq Folder Setting with Folder Suggest
         let logseqInput: TextComponent;
@@ -531,31 +1093,10 @@ class LogseqerSettingTab extends PluginSettingTab {
         // Attach folder suggest to input
         new FolderSuggest(this.app, logseqInput.inputEl);
 
-
-
-        // Obsidian Folder Setting with Folder Suggest
-        let obsidianInput: TextComponent;
-        new Setting(containerEl)
-            .setName('Obsidian Folder')
-            .setDesc('Folder containing Obsidian config (bookmarks.json)')
-            .addText(text => {
-                obsidianInput = text;
-                text.setValue(this.plugin.settings.obsidianFolder)
-                    .onChange(async (value) => {
-                        this.plugin.settings.obsidianFolder = value;
-                        await this.plugin.saveSettings();
-                    });
-            });
-
-        // Attach folder suggest to input
-        new FolderSuggest(this.app, obsidianInput.inputEl);
-
-
-
         containerEl.createEl('h3', { text: 'Backlinks Customization' });
 
         new Setting(containerEl)
-            .setName('Enable Backlink Default Query')
+            .setName('Backlink Default Query')
             .setDesc('Automatically set a search query in backlinks for Journals.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableBacklinkQuery)
@@ -586,14 +1127,375 @@ class LogseqerSettingTab extends PluginSettingTab {
                 .setWarning()
                 .onClick(async () => {
                     // Confirmation dialog
-                    const confirmed = confirm('Are you sure you want to restore all settings to default values? This cannot be undone.');
-                    if (confirmed) {
+                    new CustomConfirmationModal(this.app, 'Are you sure you want to restore all settings to default values? This cannot be undone.', async () => {
                         this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
                         await this.plugin.saveSettings();
                         this.display(); // Refresh the settings display
                         new Notice('Settings restored to defaults');
-                    }
+                    }).open();
                 }));
+        // Developer Mode (last item in Advanced)
+        const devModeSetting = new Setting(containerEl)
+            .setName('Dev Mode')
+            .setDesc('WARNING: Adds a dev button to the status bar for testing features. Not recommended for production use.');
+
+        if (this.plugin.settings.developerMode) {
+            devModeSetting.addButton(button => button
+                .setButtonText('Disable')
+                .setWarning()
+                .onClick(async () => {
+                    this.plugin.settings.developerMode = false;
+                    await this.plugin.saveSettings();
+                    this.plugin.removeDevButton();
+                    this.display();
+                }));
+        } else {
+            devModeSetting.addButton(button => button
+                .setButtonText('Enable')
+                .setWarning()
+                .onClick(async () => {
+                    this.plugin.settings.developerMode = true;
+                    await this.plugin.saveSettings();
+                    this.plugin.createDevButton();
+                    this.display();
+                }));
+        }
+    }
+}
+
+class BookmarkSyncModal extends Modal {
+    plugin: LogseqerPlugin;
+    obsidianPages: string[];
+    logseqPages: string[];
+    bookmarkPath: string;
+    logseqConfigPath: string;
+    canModifyObsidian: boolean;
+    canModifyLogseq: boolean;
+    direction: string;
+    
+    // State
+    currentView: 'obsidian' | 'logseq';
+    selectedToAdd: Set<string>; // Pages to add to current view
+    selectedExisting: Set<string>; // Existing pages in current view (for reference)
+
+    constructor(
+        app: App,
+        plugin: LogseqerPlugin,
+        obsidianPages: string[],
+        logseqPages: string[],
+        bookmarkPath: string,
+        logseqConfigPath: string,
+        canModifyObsidian: boolean,
+        canModifyLogseq: boolean,
+        direction: string
+    ) {
+        super(app);
+        this.plugin = plugin;
+        this.obsidianPages = obsidianPages;
+        this.logseqPages = logseqPages;
+        this.bookmarkPath = bookmarkPath;
+        this.logseqConfigPath = logseqConfigPath;
+        this.canModifyObsidian = canModifyObsidian;
+        this.canModifyLogseq = canModifyLogseq;
+        this.direction = direction;
+        
+        // Default view based on direction
+        this.currentView = direction === 'logseq-to-obsidian' ? 'logseq' : 'obsidian';
+        this.selectedToAdd = new Set();
+        this.selectedExisting = new Set();
+        
+        // Initialize selections based on current view
+        this.initializeSelections();
+    }
+
+    initializeSelections() {
+        if (this.currentView === 'obsidian') {
+            // Show what Logseq has that Obsidian doesn't (to add to Obsidian)
+            const toAdd = this.logseqPages.filter(p => !this.obsidianPages.includes(p));
+            this.selectedToAdd = new Set(toAdd);
+            this.selectedExisting = new Set(this.obsidianPages);
+        } else {
+            // Show what Obsidian has that Logseq doesn't (to add to Logseq)
+            const toAdd = this.obsidianPages.filter(p => !this.logseqPages.includes(p));
+            this.selectedToAdd = new Set(toAdd);
+            this.selectedExisting = new Set(this.logseqPages);
+        }
+    }
+
+    updateSelections() {
+        // Update existing pages display when switching views
+        if (this.currentView === 'obsidian') {
+            this.selectedExisting = new Set(this.obsidianPages);
+        } else {
+            this.selectedExisting = new Set(this.logseqPages);
+        }
+        // Keep selectedToAdd - user's selections persist when switching views
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        
+        // Title with sync direction
+        const directionText = this.direction === 'bidirectional' ? 'Bidirectional Sync' :
+                             this.direction === 'logseq-to-obsidian' ? 'Logseq → Obsidian' :
+                             'Obsidian → Logseq';
+        contentEl.createEl('h2', { text: `Bookmark Sync: ${directionText}` });
+        
+        // Description
+        contentEl.createEl('p', { 
+            text: `Select bookmarks to sync. Switch between Obsidian and Logseq views using the buttons below.`,
+            cls: 'logseqer-sync-desc' 
+        });
+        
+        // Toggle buttons for Obsidian/Logseq
+        const toggleContainer = contentEl.createDiv({ cls: 'modal-button-row' });
+        toggleContainer.style.marginBottom = '20px';
+        const leftDiv = toggleContainer.createDiv({ cls: 'modal-button-left' });
+        const obsidianBtn = leftDiv.createEl('button', {
+            text: 'Obsidian',
+            cls: this.currentView === 'obsidian' ? 'mod-cta' : ''
+        });
+        const logseqBtn = leftDiv.createEl('button', {
+            text: 'Logseq',
+            cls: this.currentView === 'logseq' ? 'mod-cta' : ''
+        });
+        
+        obsidianBtn.onclick = () => {
+            this.currentView = 'obsidian';
+            this.updateSelections();
+            // Re-initialize selections for new view
+            const toAdd = this.logseqPages.filter(p => !this.obsidianPages.includes(p));
+            this.selectedToAdd = new Set(toAdd.filter(p => this.selectedToAdd.has(p))); // Keep only valid selections
+            this.onOpen();
+        };
+        logseqBtn.onclick = () => {
+            this.currentView = 'logseq';
+            this.updateSelections();
+            // Re-initialize selections for new view
+            const toAdd = this.obsidianPages.filter(p => !this.logseqPages.includes(p));
+            this.selectedToAdd = new Set(toAdd.filter(p => this.selectedToAdd.has(p))); // Keep only valid selections
+            this.onOpen();
+        };
+        
+        // Determine if current view can be modified
+        const canModify = this.currentView === 'obsidian' ? this.canModifyObsidian : this.canModifyLogseq;
+        const otherPages = this.currentView === 'obsidian' ? this.logseqPages : this.obsidianPages;
+        const currentPages = this.currentView === 'obsidian' ? this.obsidianPages : this.logseqPages;
+        const toAddItems = otherPages.filter(p => !currentPages.includes(p)).sort();
+        
+        // Section 1: Pages to add (from other software)
+        const toAddSection = contentEl.createDiv({ cls: 'logseqer-sync-section' });
+        const toAddHeader = toAddSection.createDiv({ cls: 'logseqer-sync-header' });
+        const toAddTitle = toAddHeader.createSpan({ 
+            text: `To Add (${toAddItems.length})`,
+            cls: 'logseqer-sync-header'
+        });
+        const toAddHeaderCheckbox = toAddHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' }) as HTMLInputElement;
+        toAddHeaderCheckbox.disabled = !canModify;
+        toAddHeaderCheckbox.checked = canModify && toAddItems.length > 0 && 
+            toAddItems.every(p => this.selectedToAdd.has(p));
+        toAddHeaderCheckbox.onchange = () => {
+            if (canModify) {
+                if (toAddHeaderCheckbox.checked) {
+                    toAddItems.forEach(p => this.selectedToAdd.add(p));
+                } else {
+                    toAddItems.forEach(p => this.selectedToAdd.delete(p));
+                }
+                this.contentEl.empty();
+                this.onOpen();
+            }
+        };
+        
+        const toAddList = toAddSection.createDiv({ cls: 'logseqer-sync-list' });
+        toAddItems.forEach(page => {
+            const item = toAddList.createDiv({ cls: 'logseqer-sync-item' });
+            const labelDiv = item.createDiv({ cls: 'logseqer-sync-item-label' });
+            labelDiv.setText(page);
+            
+            const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
+            const checkbox = controlDiv.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+            checkbox.disabled = !canModify;
+            checkbox.checked = this.selectedToAdd.has(page);
+            checkbox.onchange = () => {
+                if (canModify) {
+                    if (checkbox.checked) {
+                        this.selectedToAdd.add(page);
+                    } else {
+                        this.selectedToAdd.delete(page);
+                    }
+                    // Update header checkbox
+                    toAddHeaderCheckbox.checked = toAddItems.every(p => this.selectedToAdd.has(p));
+                }
+            };
+        });
+        
+        if (toAddItems.length === 0) {
+            const emptyItem = toAddList.createDiv({ cls: 'logseqer-sync-item' });
+            emptyItem.createDiv({ text: 'No new pages to add', cls: 'logseqer-sync-item-label' });
+        }
+        
+        // Section 2: Existing pages
+        const existingSection = contentEl.createDiv({ cls: 'logseqer-sync-section' });
+        const existingHeader = existingSection.createDiv({ cls: 'logseqer-sync-header' });
+        const existingTitle = existingHeader.createSpan({ 
+            text: `Existing (${currentPages.length})`,
+            cls: 'logseqer-sync-header'
+        });
+        const existingHeaderCheckbox = existingHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' }) as HTMLInputElement;
+        existingHeaderCheckbox.disabled = true; // Existing items are read-only
+        existingHeaderCheckbox.checked = currentPages.length > 0;
+        
+        const existingList = existingSection.createDiv({ cls: 'logseqer-sync-list' });
+        const existingItems = currentPages.sort();
+        existingItems.forEach(page => {
+            const item = existingList.createDiv({ cls: 'logseqer-sync-item' });
+            const labelDiv = item.createDiv({ cls: 'logseqer-sync-item-label' });
+            labelDiv.setText(page);
+            
+            const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
+            const checkbox = controlDiv.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+            checkbox.disabled = true; // Existing items are read-only
+            checkbox.checked = true;
+        });
+        
+        if (existingItems.length === 0) {
+            const emptyItem = existingList.createDiv({ cls: 'logseqer-sync-item' });
+            emptyItem.createDiv({ text: 'No existing pages', cls: 'logseqer-sync-item-label' });
+        }
+        
+        // Action buttons
+        const btnRow = contentEl.createDiv({ cls: 'modal-button-row' });
+        const rightDiv = btnRow.createDiv({ cls: 'modal-button-right' });
+        
+        const confirmBtn = rightDiv.createEl('button', { text: 'Confirm', cls: 'mod-cta' });
+        confirmBtn.onclick = async () => {
+            await this.executeSync();
+            this.close();
+        };
+        
+        const cancelBtn = rightDiv.createEl('button', { text: 'Cancel' });
+        cancelBtn.onclick = () => this.close();
+        
+        // Adjust footer button widths (same as VaultCheckResolutionModal)
+        const adjustFooterLayout = () => {
+            const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button')) as HTMLButtonElement[];
+            allBtns.forEach(b => { b.style.width = ''; b.style.display = ''; });
+            const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
+            let maxW = 0;
+            allBtns.forEach(b => { maxW = Math.max(maxW, b.getBoundingClientRect().width); });
+            const gap = 8;
+            const totalNeeded = maxW * allBtns.length + gap * (allBtns.length - 1);
+            if (totalNeeded <= contentW) {
+                allBtns.forEach(b => b.style.width = `${Math.ceil(maxW)}px`);
+                rightDiv.style.flexBasis = '';
+            } else {
+                rightDiv.style.flexBasis = '100%';
+                const rightBtns = Array.from(rightDiv.querySelectorAll('button')) as HTMLButtonElement[];
+                if (rightBtns.length > 0) {
+                    let m = 0;
+                    rightBtns.forEach(b => m = Math.max(m, b.getBoundingClientRect().width));
+                    rightBtns.forEach(b => b.style.width = `${Math.ceil(m)}px`);
+                }
+                const widest = Math.max(...allBtns.map(b => b.getBoundingClientRect().width));
+                if (widest > contentW) {
+                    allBtns.forEach(b => { b.style.width = '100%'; b.style.display = 'block'; });
+                }
+            }
+        };
+        
+        setTimeout(() => adjustFooterLayout(), 30);
+        window.addEventListener('resize', adjustFooterLayout);
+    }
+
+    async executeSync() {
+        const adapter = this.app.vault.adapter;
+        
+        try {
+            // Sync to Obsidian if needed (pages from Logseq that are selected)
+            if (this.canModifyObsidian) {
+                const pagesToAddToObsidian = Array.from(this.selectedToAdd).filter(p => 
+                    this.logseqPages.includes(p) && !this.obsidianPages.includes(p)
+                );
+                
+                if (pagesToAddToObsidian.length > 0) {
+                    const bookmarkContent = JSON.parse(await adapter.read(this.bookmarkPath));
+                    const existingPaths = new Set(bookmarkContent.items.map((item: any) => item.path));
+                    
+                    // Build file map
+                    const allFiles = this.app.vault.getMarkdownFiles();
+                    const fileMap = new Map<string, TFile[]>();
+                    for (const file of allFiles) {
+                        if (!fileMap.has(file.basename)) {
+                            fileMap.set(file.basename, []);
+                        }
+                        fileMap.get(file.basename)?.push(file);
+                    }
+                    
+                    let addedCount = 0;
+                    for (const pageName of pagesToAddToObsidian) {
+                        const matches = fileMap.get(pageName) || [];
+                        if (matches.length === 1) {
+                            const file = matches[0];
+                            if (!existingPaths.has(file.path)) {
+                                bookmarkContent.items.push({
+                                    type: 'file',
+                                    ctime: Date.now(),
+                                    path: file.path
+                                });
+                                existingPaths.add(file.path);
+                                addedCount++;
+                            }
+                        }
+                    }
+                    
+                    if (addedCount > 0) {
+                        await adapter.write(this.bookmarkPath, JSON.stringify(bookmarkContent, null, 2));
+                        new Notice(`Added ${addedCount} bookmarks to Obsidian.`);
+                    }
+                }
+            }
+            
+            // Sync to Logseq if needed (pages from Obsidian that are selected)
+            if (this.canModifyLogseq) {
+                const pagesToAddToLogseq = Array.from(this.selectedToAdd).filter(p =>
+                    this.obsidianPages.includes(p) && !this.logseqPages.includes(p)
+                );
+                
+                if (pagesToAddToLogseq.length > 0) {
+                    let configContent = await adapter.read(this.logseqConfigPath);
+                    const favoritesRegex = /:favorites\s*\[([^\]]*)\]/;
+                    const match = configContent.match(favoritesRegex);
+                    
+                    // Merge with existing
+                    const currentExisting = match ? match[1].match(/"([^"]+)"/g)?.map(s => s.replace(/"/g, '')) || [] : [];
+                    const mergedFavorites = new Set<string>([...currentExisting, ...pagesToAddToLogseq]);
+                    const sortedMerged = Array.from(mergedFavorites).sort();
+                    const favoritesArray = sortedMerged.map(name => `"${name}"`).join(' ');
+                    
+                    if (match) {
+                        configContent = configContent.replace(favoritesRegex, `:favorites [${favoritesArray}]`);
+                    } else {
+                        if (configContent.trim().endsWith('}')) {
+                            configContent = configContent.slice(0, -1) + ` :favorites [${favoritesArray}]\n}`;
+                        } else {
+                            configContent += `\n:favorites [${favoritesArray}]`;
+                        }
+                    }
+                    
+                    await adapter.write(this.logseqConfigPath, configContent);
+                    new Notice(`Added ${pagesToAddToLogseq.length} favorites to Logseq.`);
+                }
+            }
+            
+        } catch (e) {
+            console.error("Logseqer: Error executing bookmark sync", e);
+            new Notice("Error executing bookmark sync. See console.");
+        }
+    }
+
+    onClose() {
+        this.contentEl.empty();
     }
 }
 
@@ -602,6 +1504,7 @@ class SyncResolutionModal extends Modal {
     missingPages: string[];
     ambiguousPages: { name: string; files: TFile[] }[];
     bookmarkPath: string;
+    simulation: boolean;
 
     // State
     selectedMissing: Set<string>;
@@ -612,13 +1515,15 @@ class SyncResolutionModal extends Modal {
         plugin: LogseqerPlugin,
         missingPages: string[],
         ambiguousPages: { name: string; files: TFile[] }[],
-        bookmarkPath: string
+        bookmarkPath: string,
+        simulation: boolean = false
     ) {
         super(app);
         this.plugin = plugin;
         this.missingPages = missingPages;
         this.ambiguousPages = ambiguousPages;
         this.bookmarkPath = bookmarkPath;
+        this.simulation = !!simulation;
 
         this.selectedMissing = new Set(missingPages);
         this.selectedAmbiguous = new Map();
@@ -699,6 +1604,11 @@ class SyncResolutionModal extends Modal {
     }
 
     async executeSync() {
+        if (this.simulation) {
+            new Notice('Simulation mode: no changes will be made.');
+            return;
+        }
+
         this.close();
         const adapter = this.app.vault.adapter;
         let createdCount = 0;
@@ -721,7 +1631,6 @@ class SyncResolutionModal extends Modal {
             // 2. Missing
             for (const name of Array.from(this.selectedMissing)) {
                 // Use default location for new notes
-                // @ts-ignore
                 const folderPath = this.app.fileManager.getNewFileParent("").path;
                 const targetPath = `${folderPath}/${name}.md`;
 
@@ -748,7 +1657,7 @@ class SyncResolutionModal extends Modal {
             }
 
         } catch (e) {
-            console.error(e);
+            console.error("Logseqer: Failed to sync bookmarks", e);
             new Notice("Failed to sync bookmarks.");
         }
     }
@@ -759,8 +1668,8 @@ class SyncResolutionModal extends Modal {
 }
 
 interface VaultCheckIssue {
-    file: TFile;
-    type: 'Date' | 'Namespace' | 'Task Marker';
+    file?: TFile; // Optional: Settings type issues don't need a specific file
+    type: 'Date' | 'Namespace' | 'Task Marker' | 'Settings';
     description: string;
     suggestedFix: string;
     fixData: any;
@@ -770,12 +1679,16 @@ class VaultCheckResolutionModal extends Modal {
     plugin: LogseqerPlugin;
     issues: VaultCheckIssue[];
     selectedIssues: Set<VaultCheckIssue>;
+    simulation: boolean;
+    components: Component[]; // Store components for cleanup
 
-    constructor(app: App, plugin: LogseqerPlugin, issues: VaultCheckIssue[]) {
+    constructor(app: App, plugin: LogseqerPlugin, issues: VaultCheckIssue[], simulation: boolean = false) {
         super(app);
         this.plugin = plugin;
         this.issues = issues;
         this.selectedIssues = new Set(issues.filter(i => i.fixData !== null));
+        this.simulation = !!simulation;
+        this.components = [];
     }
 
     onOpen() {
@@ -783,40 +1696,150 @@ class VaultCheckResolutionModal extends Modal {
         contentEl.createEl('h2', { text: 'Vault Compatibility Check' });
         contentEl.createEl('p', { text: 'The following Logseq-to-Obsidian compatibility issues were found. Select the fixes you wish to apply.', cls: 'logseqer-sync-desc' });
 
-        const section = contentEl.createDiv({ cls: 'logseqer-sync-section' });
-        const list = section.createDiv({ cls: 'logseqer-sync-list' });
+            // (Select controls moved to modal footer)
 
-        this.issues.forEach(issue => {
-            const item = list.createDiv({ cls: 'logseqer-sync-item' });
+        // Group issues by type
+        const groups = new Map<string, VaultCheckIssue[]>();
+        for (const i of this.issues) {
+            const arr = groups.get(i.type) || [];
+            arr.push(i);
+            groups.set(i.type, arr);
+        }
 
-            const infoDiv = item.createDiv({ cls: 'logseqer-sync-item-label' });
-            infoDiv.createEl('span', { text: `[${issue.type}] `, cls: 'logseqer-issue-type' }).style.fontWeight = 'bold';
-            infoDiv.createEl('span', { text: issue.description });
-            infoDiv.createEl('br');
-            infoDiv.createEl('span', { text: issue.suggestedFix, cls: 'logseqer-issue-fix' }).style.fontSize = '0.9em';
-            infoDiv.createEl('span', { text: ` (File: ${issue.file.path})`, cls: 'logseqer-issue-path' }).style.color = 'var(--text-muted)';
+        groups.forEach((items, type) => {
+            const section = contentEl.createDiv({ cls: 'logseqer-sync-section' });
+            const header = section.createDiv({ cls: 'logseqer-sync-header' });
+            const title = header.createSpan({ text: `${type} (${items.length})`, cls: 'logseqer-sync-header' });
 
-            if (issue.fixData) {
-                const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
-                const checkbox = controlDiv.createEl('input', { type: 'checkbox' });
-                checkbox.checked = this.selectedIssues.has(issue);
+            // Group select checkbox (aligned right)
+            const groupCheckbox = header.createEl('input', { type: 'checkbox', cls: 'group-checkbox' }) as HTMLInputElement;
+            groupCheckbox.checked = items.every(it => this.selectedIssues.has(it));
+            groupCheckbox.onchange = () => {
+                if (groupCheckbox.checked) items.forEach(it => { if (it.fixData) this.selectedIssues.add(it); });
+                else items.forEach(it => this.selectedIssues.delete(it));
+                this.contentEl.empty();
+                this.onOpen();
+            };
 
-                checkbox.onchange = (e) => {
-                    if ((e.target as HTMLInputElement).checked) this.selectedIssues.add(issue);
-                    else this.selectedIssues.delete(issue);
-                };
-            }
+            const list = section.createDiv({ cls: 'logseqer-sync-list' });
+
+            items.forEach(issue => {
+                const item = list.createDiv({ cls: 'logseqer-sync-item' });
+                const infoDiv = item.createDiv({ cls: 'logseqer-sync-item-label' });
+                
+                // Show file path with Obsidian native link preview (if file exists)
+                const pathDiv = infoDiv.createDiv({ cls: 'logseqer-issue-path' });
+                if (issue.file) {
+                    // Try using workspace hover-link event for preview
+                    // Remove .md extension for internal link format
+                    const hrefPath = issue.file.path.replace(/\.md$/, '');
+                    const link = pathDiv.createEl('a', {
+                        cls: 'internal-link',
+                        text: issue.file.path,
+                        href: hrefPath
+                    });
+                    link.setAttribute('data-href', hrefPath);
+                    link.setAttribute('href', hrefPath);
+                    
+                    // Register hover event to trigger Obsidian's native preview
+                    // Note: Obsidian's hover preview may not work in modals without additional setup
+                    // This is a limitation - hover preview typically works in markdown views, not modals
+                    link.onclick = (e) => {
+                        e.preventDefault();
+                        this.app.workspace.openLinkText(hrefPath, '', true);
+                    };
+                } else {
+                    // For Settings type issues without a file, just show description
+                    pathDiv.setText(issue.description);
+                }
+                
+                infoDiv.createEl('div', { text: issue.suggestedFix, cls: 'logseqer-issue-fix' });
+
+                if (issue.fixData) {
+                    const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
+                    const checkbox = controlDiv.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+                    checkbox.checked = this.selectedIssues.has(issue);
+                    checkbox.onchange = (e) => {
+                        if ((e.target as HTMLInputElement).checked) this.selectedIssues.add(issue);
+                        else this.selectedIssues.delete(issue);
+                    };
+                }
+            });
         });
 
-        const btnDiv = contentEl.createDiv({ cls: 'modal-button-container' });
-        const fixBtn = btnDiv.createEl('button', { text: 'Apply Selected Fixes', cls: 'mod-cta' });
-        fixBtn.onclick = async () => {
-            await this.applyFixes();
-            this.close();
+        // Footer: left = select controls, right = actions
+        const btnRow = contentEl.createDiv({ cls: 'modal-button-row' });
+        const leftDiv = btnRow.createDiv({ cls: 'modal-button-left' });
+        const rightDiv = btnRow.createDiv({ cls: 'modal-button-right' });
+
+        const selectAllBtn = leftDiv.createEl('button', { text: 'Select All' });
+        const deselectAllBtn = leftDiv.createEl('button', { text: 'Deselect All' });
+        selectAllBtn.onclick = () => {
+            this.issues.forEach(i => { if (i.fixData) this.selectedIssues.add(i); });
+            this.contentEl.empty();
+            this.onOpen();
+        };
+        deselectAllBtn.onclick = () => {
+            this.selectedIssues.clear();
+            this.contentEl.empty();
+            this.onOpen();
         };
 
-        const cancelBtn = btnDiv.createEl('button', { text: 'Close' });
+        const fixBtn = rightDiv.createEl('button', { text: 'Apply', cls: 'mod-cta' });
+        fixBtn.onclick = async () => {
+            if (this.simulation) {
+                new Notice('Simulation mode: no changes will be made.');
+                return;
+            }
+            new CustomConfirmationModal(this.app, 'Apply selected fixes? This will modify files in your vault.', async () => {
+                await this.applyFixes();
+                this.close();
+            }).open();
+        };
+
+        const cancelBtn = rightDiv.createEl('button', { text: 'Close' });
         cancelBtn.onclick = () => this.close();
+
+        // Adjust footer button widths and wrapping to match available space
+        const adjustFooterLayout = () => {
+            const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button')) as HTMLButtonElement[];
+            // Reset styles
+            allBtns.forEach(b => { b.style.width = ''; b.style.display = ''; });
+            const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
+            // measure widest
+            let maxW = 0;
+            allBtns.forEach(b => { maxW = Math.max(maxW, b.getBoundingClientRect().width); });
+            const gap = 8; // approx
+            const totalNeeded = maxW * allBtns.length + gap * (allBtns.length - 1);
+            if (totalNeeded <= contentW) {
+                // put left and right on same row, equalize width to maxW
+                allBtns.forEach(b => b.style.width = `${Math.ceil(maxW)}px`);
+                leftDiv.style.flexBasis = '';
+                rightDiv.style.flexBasis = '';
+            } else {
+                // Not enough space: put left group then right group
+                leftDiv.style.flexBasis = '100%';
+                rightDiv.style.flexBasis = '100%';
+                // ensure buttons inside groups share equal widths
+                const leftBtns = Array.from(leftDiv.querySelectorAll('button')) as HTMLButtonElement[];
+                const rightBtns = Array.from(rightDiv.querySelectorAll('button')) as HTMLButtonElement[];
+                const groups = [leftBtns, rightBtns];
+                groups.forEach(g => {
+                    if (g.length === 0) return;
+                    let m = 0;
+                    g.forEach(b => m = Math.max(m, b.getBoundingClientRect().width));
+                    g.forEach(b => b.style.width = `${Math.ceil(m)}px`);
+                });
+                // if still too wide, stack each button
+                const widest = Math.max(...allBtns.map(b => b.getBoundingClientRect().width));
+                if (widest > contentW) {
+                    allBtns.forEach(b => { b.style.width = '100%'; b.style.display = 'block'; });
+                }
+            }
+        };
+
+        setTimeout(() => adjustFooterLayout(), 30);
+        window.addEventListener('resize', adjustFooterLayout);
     }
 
     async applyFixes() {
@@ -842,16 +1865,72 @@ class VaultCheckResolutionModal extends Modal {
                 } else if (issue.fixData.type === 'content-replace') {
                     // Replace Logseq task markers
                     let content = await this.app.vault.read(issue.file);
-                    content = content.replace(/^TODO /gm, '- [ ] ');
-                    content = content.replace(/^DOING /gm, '- [/] ');
-                    content = content.replace(/^- TODO /gm, '- [ ] ');
-                    content = content.replace(/^- DOING /gm, '- [/] ');
+                    // Normalize DONE -> checked
+                    content = content.replace(/^(\s*-?\s*)(?:DONE)\b\s*:??\s*/gmi, '$1- [x] ');
+                    // Normalize TODO/DOING/NOW/LATER -> unchecked
+                    content = content.replace(/^(\s*-?\s*)(?:TODO|DOING|NOW|LATER)\b\s*:??\s*/gmi, '$1- [ ] ');
 
                     await this.app.vault.modify(issue.file, content);
                     contentCount++;
+                } else if (issue.fixData.type === 'namespace-rename') {
+                    // Rename file from "a___b___c.md" to "c.md" and add "tags: a/b" at the beginning
+                    const newPath = issue.fixData.newPath;
+                    const namespacePath = issue.fixData.namespacePath;
+                    
+                    // Read current content
+                    let content = await this.app.vault.read(issue.file);
+                    
+                    // Add tags at the beginning if not already present
+                    const tagsLine = `tags: ${namespacePath}`;
+                    if (!content.includes(tagsLine)) {
+                        // Check if file already has tags or frontmatter
+                        const hasFrontmatter = content.startsWith('---');
+                        if (hasFrontmatter) {
+                            // Insert after frontmatter
+                            const frontmatterEnd = content.indexOf('---', 3);
+                            if (frontmatterEnd !== -1) {
+                                content = content.slice(0, frontmatterEnd + 3) + '\n' + tagsLine + '\n' + content.slice(frontmatterEnd + 3);
+                            } else {
+                                // Malformed frontmatter, add at beginning
+                                content = tagsLine + '\n\n' + content;
+                            }
+                        } else {
+                            // No frontmatter, add at the beginning
+                            content = tagsLine + '\n\n' + content;
+                        }
+                    }
+                    
+                    // Update content first (before rename to avoid path issues)
+                    await this.app.vault.modify(issue.file, content);
+                    
+                    // Rename file
+                    await this.app.fileManager.renameFile(issue.file, newPath);
+                    
+                    renameCount++;
+                    contentCount++;
+                } else if (issue.fixData.type === 'settings-update') {
+                    // Update a config file in the vault config dir
+                    try {
+                        const cfgDir = this.app.vault.configDir;
+                        const adapter = this.app.vault.adapter;
+                        const target = issue.fixData.target; // 'daily-notes.json' or 'app.json'
+                        const key = issue.fixData.key;
+                        const value = issue.fixData.value;
+                        const path = `${cfgDir}/${target}`;
+                        let data = {} as any;
+                        if (await adapter.exists(path)) {
+                            const txt = await adapter.read(path);
+                            try { data = JSON.parse(txt); } catch (e) { data = {}; }
+                        }
+                        data[key] = value;
+                        await adapter.write(path, JSON.stringify(data, null, 2));
+                    } catch (e) {
+                        console.error('Failed to update settings file', e);
+                    }
                 }
             } catch (e) {
-                console.error(`Failed to fix issue for ${issue.file.path}:`, e);
+                const issueDesc = issue.file ? issue.file.path : issue.description;
+                console.error(`Failed to fix issue for ${issueDesc}:`, e);
             }
         }
 
@@ -859,6 +1938,9 @@ class VaultCheckResolutionModal extends Modal {
     }
 
     onClose() {
+        // Clean up components
+        this.components.forEach(component => component.unload());
+        this.components = [];
         this.contentEl.empty();
     }
 }
