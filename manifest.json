@@ -2,7 +2,8 @@
     "id": "obsidian-logseqer-plugin",
     "name": "Logseqer",
     "version": "0.1.0",
-    "description": "Make obsidian more Logseq-natively or reinforce usage experience using both.",
+    "description": "Provides a Logseq-native experience and enhance workflow compatibility between both applications.",
+    "minAppVersion": "1.11.0",
     "author": "sisyphe42",
     "authorUrl": "https://github.com/Sisyphe42",
     "isDesktopOnly": false
