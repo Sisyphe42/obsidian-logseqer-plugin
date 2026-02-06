@@ -1,5 +1,5 @@
 {
-    "id": "obsidian-logseqer-plugin",
+    "id": "logseqer",
     "name": "Logseqer",
     "version": "0.1.0",
     "description": "Provides a Logseq-native experience and enhance workflow compatibility between both applications.",
