@@ -1,61 +1,46 @@
-(function () {
-  // 定义检测函数
-  function checkLogseqSyntax() {
-    const noteContentElement = document.querySelector(
-      "body > div.app-container > div.horizontal-main-container > div > div.workspace-split.mod-vertical.mod-root > div > div.workspace-tab-container > div > div > div.view-content > div.markdown-source-view.cm-s-obsidian.mod-cm6.node-insert-event.is-folding.show-properties.is-live-preview > div > div.cm-scroller > div.cm-sizer > div.cm-contentContainer > div.cm-content.cm-lineWrapping"
-    );
+// 检查DOM中的Logseq语法（列表元素）
+export function checkLogseqSyntaxDOM() {
+  const lines = document.querySelectorAll('.cm-content > .cm-line');
+  let invalidCount = 0;
 
-    if (!noteContentElement) return;
-
-    const text = noteContentElement.innerText;
-    const paragraphs = text.split("\n").filter((line) => line.trim() !== "");
-    const ruleRegExp = /^- /;
-    let invalidCount = 0;
-
-    paragraphs.forEach((paragraph) => {
-      if (!ruleRegExp.test(paragraph)) {
-        invalidCount++;
-      }
-    });
-
-    updateStatusBar(invalidCount);
-  }
-
-  // 定义状态栏更新函数
-  function updateStatusBar(count) {
-    const statusBar = document.querySelector("body > div.app-container > div.status-bar");
-    if (!statusBar) return;
-
-    let tip = document.getElementById("logseq-syntax-tip");
-    if (!tip) {
-      tip = document.createElement("span");
-      tip.id = "logseq-syntax-tip";
-      tip.style.marginLeft = "0px";
-      tip.style.fontSize = "var(--text-xs, 12px)";
-      tip.style.cursor = "default";
-      tip.style.display = "inline-flex";
-      tip.style.alignItems = "center";
-      statusBar.appendChild(tip);
+  lines.forEach(line => {
+    // 跳过空行（只包含<br>的行）
+    if (
+      line.childNodes.length === 1 &&
+      line.firstChild.nodeName === 'BR'
+    ) {
+      return;
     }
 
-    tip.textContent = count === 0 ? "✅" : count;
-    tip.style.color = count === 0 ? "var(--text-success, #4caf50)" : "var(--text-error, #f44336)";
-    tip.title = "LS语法检查";
-  }
+    // 判断是否是列表节点
+    const isList = line.classList.contains('HyperMD-list-line');
 
-  // 初始化检测
-  checkLogseqSyntax();
-
-  // 设置 MutationObserver 监听笔记内容区域的变化
-  const observer = new MutationObserver(() => {
-    checkLogseqSyntax();
+    if (!isList) {
+      invalidCount++;
+    }
   });
 
-  const noteContentElement = document.querySelector(
-    "body > div.app-container > div.horizontal-main-container > div > div.workspace-split.mod-vertical.mod-root > div > div.workspace-tab-container > div > div > div.view-content > div.markdown-source-view.cm-s-obsidian.mod-cm6.node-insert-event.is-folding.show-properties.is-live-preview > div > div.cm-scroller > div.cm-sizer > div.cm-contentContainer > div.cm-content.cm-lineWrapping"
-  );
+  return invalidCount;
+}
 
-  if (noteContentElement) {
-    observer.observe(noteContentElement, { childList: true, subtree: true });
+// 更新状态栏显示
+export function updateStatusBar(count) {
+  const statusBar = document.querySelector("body > div.app-container > div.status-bar");
+  if (!statusBar) return;
+
+  let tip = document.getElementById("logseq-syntax-tip");
+  if (!tip) {
+    tip = document.createElement("span");
+    tip.id = "logseq-syntax-tip";
+    tip.style.marginLeft = "0px";
+    tip.style.fontSize = "var(--text-xs, 12px)";
+    tip.style.cursor = "default";
+    tip.style.display = "inline-flex";
+    tip.style.alignItems = "center";
+    statusBar.appendChild(tip);
   }
-})();
+
+  tip.textContent = count === 0 ? "✅" : count;
+  tip.style.color = count === 0 ? "var(--text-success, #4caf50)" : "var(--text-error, #f44336)";
+  tip.title = `LS语法检查 (${count}个不符合)`;
+}

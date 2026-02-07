@@ -27,8 +27,7 @@ Syncs Logseq favorites to Obsidian bookmarks. Handles duplicates and creates mis
 
 ### TODO
 
-Page preview
-
+1. Page preview
 
 ## Quick Start
 

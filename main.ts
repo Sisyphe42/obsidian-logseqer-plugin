@@ -1,4 +1,5 @@
 import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component } from 'obsidian';
+import { checkLogseqSyntaxDOM } from './logseqSyntax';
 
 // Utility function for setting element styles (centralized for Obsidian best practices)
 function setElementStyles(el: HTMLElement, styles: Record<string, string>): void {
@@ -744,19 +745,7 @@ export default class LogseqerPlugin extends Plugin {
             return;
         }
 
-        const editor = view.editor;
-        const lineCount = editor.lineCount();
-        const ruleRegExp = /^- /;
-        let invalidCount = 0;
-
-        for (let i = 0; i < lineCount; i++) {
-            const line = editor.getLine(i);
-            if (line.trim() === '') continue;
-
-            if (!ruleRegExp.test(line)) {
-                invalidCount++;
-            }
-        }
+        const invalidCount = checkLogseqSyntaxDOM();
 
         if (invalidCount === 0) {
             this.statusBarItem.setText('✅');
