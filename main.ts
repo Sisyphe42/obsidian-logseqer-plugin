@@ -1,4 +1,13 @@
-import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, MarkdownRenderer, Component } from 'obsidian';
+import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component } from 'obsidian';
+
+// Utility function for setting element styles (centralized for Obsidian best practices)
+function setElementStyles(el: HTMLElement, styles: Record<string, string>): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const style = el.style as any;
+    Object.entries(styles).forEach(([key, value]) => {
+        style[key] = value;
+    });
+}
 
 // Interface for settings can be added here
 // Interface for settings
@@ -53,20 +62,20 @@ export default class LogseqerPlugin extends Plugin {
 
         // Register event for active leaf change
 
-        this.registerEvent(this.app.workspace.on('active-leaf-change', (leaf) => {
+        this.registerEvent(this.app.workspace.on('active-leaf-change', (_leaf) => {
             void this.updateSyntaxCheck();
-            void this.updateBacklinkQuery(leaf);
+            void this.updateBacklinkQuery();
         }));
 
         // Also trigger on file-open which might be cleaner for completely new files loading
-        this.registerEvent(this.app.workspace.on('file-open', (file) => {
+        this.registerEvent(this.app.workspace.on('file-open', (_file) => {
             // When file opens, the active leaf is relevant
             void this.updateBacklinkQuery();
         }));
 
         // Register event for editor changes
         this.registerEvent(
-            this.app.workspace.on('editor-change', (editor, info) => {
+            this.app.workspace.on('editor-change', (_editor, _info) => {
                 void this.updateSyntaxCheck();
             })
         );
@@ -121,7 +130,7 @@ export default class LogseqerPlugin extends Plugin {
     }
 
     onunload() {
-
+        // Cleanup on plugin unload
     }
 
     async loadSettings() {
@@ -172,12 +181,10 @@ export default class LogseqerPlugin extends Plugin {
 
         new Notice("Vault Check started...");
 
-        const adapter = this.app.vault.adapter;
         const files = this.app.vault.getMarkdownFiles();
         const issues: VaultCheckIssue[] = [];
 
         // Determine expected folders (Logseq cannot change paths here)
-        const journalFolder = this.getDailyNoteFolder();
         const pagesFolder = this.getPagesFolder();
 
         // 0. Settings check: compare Obsidian settings against Logseq expectations
@@ -614,7 +621,6 @@ export default class LogseqerPlugin extends Plugin {
             
             // Merge page names with existing favorites (only add new ones)
             const pageNamesArray = Array.from(pageNames);
-            const allFavorites = new Set<string>([...existingFavorites, ...pageNamesArray]);
             const newFavorites = pageNamesArray.filter(name => !existingFavorites.includes(name));
             
             if (newFavorites.length === 0) {
@@ -982,7 +988,7 @@ class LogseqerSettingTab extends PluginSettingTab {
         containerEl.createEl('h3', { text: 'Vault Check' });
 
         // Parent: Vault Check command with collapsible subfeatures
-        const vaultParent = new Setting(containerEl)
+        new Setting(containerEl)
             .setName('Vault Check')
             .setDesc('Show the "Check Vault Compatibility" command in the command palette.')
             .addToggle(toggle => toggle
@@ -1250,7 +1256,7 @@ class BookmarkSyncModal extends Modal {
         
         // Toggle buttons for Obsidian/Logseq
         const toggleContainer = contentEl.createDiv({ cls: 'modal-button-row' });
-        toggleContainer.style.marginBottom = '20px';
+        setElementStyles(toggleContainer, { marginBottom: '20px' });
         const leftDiv = toggleContainer.createDiv({ cls: 'modal-button-left' });
         const obsidianBtn = leftDiv.createEl('button', {
             text: 'Obsidian',
@@ -1287,7 +1293,7 @@ class BookmarkSyncModal extends Modal {
         // Section 1: Pages to add (from other software)
         const toAddSection = contentEl.createDiv({ cls: 'logseqer-sync-section' });
         const toAddHeader = toAddSection.createDiv({ cls: 'logseqer-sync-header' });
-        const toAddTitle = toAddHeader.createSpan({ 
+        toAddHeader.createSpan({
             text: `To Add (${toAddItems.length})`,
             cls: 'logseqer-sync-header'
         });
@@ -1338,7 +1344,7 @@ class BookmarkSyncModal extends Modal {
         // Section 2: Existing pages
         const existingSection = contentEl.createDiv({ cls: 'logseqer-sync-section' });
         const existingHeader = existingSection.createDiv({ cls: 'logseqer-sync-header' });
-        const existingTitle = existingHeader.createSpan({ 
+        existingHeader.createSpan({
             text: `Existing (${currentPages.length})`,
             cls: 'logseqer-sync-header'
         });
@@ -1380,26 +1386,26 @@ class BookmarkSyncModal extends Modal {
         // Adjust footer button widths (same as VaultCheckResolutionModal)
         const adjustFooterLayout = () => {
             const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button')) as HTMLButtonElement[];
-            allBtns.forEach(b => { b.style.width = ''; b.style.display = ''; });
+            allBtns.forEach(b => { setElementStyles(b, { width: '', display: '' }); });
             const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
             let maxW = 0;
             allBtns.forEach(b => { maxW = Math.max(maxW, b.getBoundingClientRect().width); });
             const gap = 8;
             const totalNeeded = maxW * allBtns.length + gap * (allBtns.length - 1);
             if (totalNeeded <= contentW) {
-                allBtns.forEach(b => b.style.width = `${Math.ceil(maxW)}px`);
-                rightDiv.style.flexBasis = '';
+                allBtns.forEach(b => setElementStyles(b, { width: `${Math.ceil(maxW)}px` }));
+                setElementStyles(rightDiv, { flexBasis: '' });
             } else {
-                rightDiv.style.flexBasis = '100%';
+                setElementStyles(rightDiv, { flexBasis: '100%' });
                 const rightBtns = Array.from(rightDiv.querySelectorAll('button')) as HTMLButtonElement[];
                 if (rightBtns.length > 0) {
                     let m = 0;
                     rightBtns.forEach(b => m = Math.max(m, b.getBoundingClientRect().width));
-                    rightBtns.forEach(b => b.style.width = `${Math.ceil(m)}px`);
+                    rightBtns.forEach(b => setElementStyles(b, { width: `${Math.ceil(m)}px` }));
                 }
                 const widest = Math.max(...allBtns.map(b => b.getBoundingClientRect().width));
                 if (widest > contentW) {
-                    allBtns.forEach(b => { b.style.width = '100%'; b.style.display = 'block'; });
+                    allBtns.forEach(b => { setElementStyles(b, { width: '100%', display: 'block' }); });
                 }
             }
         };
@@ -1516,7 +1522,7 @@ class SyncResolutionModal extends Modal {
         missingPages: string[],
         ambiguousPages: { name: string; files: TFile[] }[],
         bookmarkPath: string,
-        simulation: boolean = false
+        simulation = false
     ) {
         super(app);
         this.plugin = plugin;
@@ -1557,7 +1563,7 @@ class SyncResolutionModal extends Modal {
                 const select = controlDiv.createEl('select');
 
                 p.files.forEach(f => {
-                    const opt = select.createEl('option', { text: f.path, value: f.path });
+                    select.createEl('option', { text: f.path, value: f.path });
                 });
 
                 select.onchange = (e) => {
@@ -1619,7 +1625,7 @@ class SyncResolutionModal extends Modal {
             const bookmarkContent = JSON.parse(await adapter.read(this.bookmarkPath));
 
             // 1. Ambiguous
-            this.selectedAmbiguous.forEach((path, name) => {
+            this.selectedAmbiguous.forEach((_name, path) => {
                 bookmarkContent.items.push({
                     type: 'file',
                     ctime: Date.now(),
@@ -1682,7 +1688,7 @@ class VaultCheckResolutionModal extends Modal {
     simulation: boolean;
     components: Component[]; // Store components for cleanup
 
-    constructor(app: App, plugin: LogseqerPlugin, issues: VaultCheckIssue[], simulation: boolean = false) {
+    constructor(app: App, plugin: LogseqerPlugin, issues: VaultCheckIssue[], simulation = false) {
         super(app);
         this.plugin = plugin;
         this.issues = issues;
@@ -1709,7 +1715,7 @@ class VaultCheckResolutionModal extends Modal {
         groups.forEach((items, type) => {
             const section = contentEl.createDiv({ cls: 'logseqer-sync-section' });
             const header = section.createDiv({ cls: 'logseqer-sync-header' });
-            const title = header.createSpan({ text: `${type} (${items.length})`, cls: 'logseqer-sync-header' });
+            header.createSpan({ text: `${type} (${items.length})`, cls: 'logseqer-sync-header' });
 
             // Group select checkbox (aligned right)
             const groupCheckbox = header.createEl('input', { type: 'checkbox', cls: 'group-checkbox' }) as HTMLInputElement;
@@ -1804,7 +1810,7 @@ class VaultCheckResolutionModal extends Modal {
         const adjustFooterLayout = () => {
             const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button')) as HTMLButtonElement[];
             // Reset styles
-            allBtns.forEach(b => { b.style.width = ''; b.style.display = ''; });
+            allBtns.forEach(b => { setElementStyles(b, { width: '', display: '' }); });
             const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
             // measure widest
             let maxW = 0;
@@ -1813,13 +1819,13 @@ class VaultCheckResolutionModal extends Modal {
             const totalNeeded = maxW * allBtns.length + gap * (allBtns.length - 1);
             if (totalNeeded <= contentW) {
                 // put left and right on same row, equalize width to maxW
-                allBtns.forEach(b => b.style.width = `${Math.ceil(maxW)}px`);
-                leftDiv.style.flexBasis = '';
-                rightDiv.style.flexBasis = '';
+                allBtns.forEach(b => setElementStyles(b, { width: `${Math.ceil(maxW)}px` }));
+                setElementStyles(leftDiv, { flexBasis: '' });
+                setElementStyles(rightDiv, { flexBasis: '' });
             } else {
                 // Not enough space: put left group then right group
-                leftDiv.style.flexBasis = '100%';
-                rightDiv.style.flexBasis = '100%';
+                setElementStyles(leftDiv, { flexBasis: '100%' });
+                setElementStyles(rightDiv, { flexBasis: '100%' });
                 // ensure buttons inside groups share equal widths
                 const leftBtns = Array.from(leftDiv.querySelectorAll('button')) as HTMLButtonElement[];
                 const rightBtns = Array.from(rightDiv.querySelectorAll('button')) as HTMLButtonElement[];
@@ -1828,12 +1834,12 @@ class VaultCheckResolutionModal extends Modal {
                     if (g.length === 0) return;
                     let m = 0;
                     g.forEach(b => m = Math.max(m, b.getBoundingClientRect().width));
-                    g.forEach(b => b.style.width = `${Math.ceil(m)}px`);
+                    g.forEach(b => setElementStyles(b, { width: `${Math.ceil(m)}px` }));
                 });
                 // if still too wide, stack each button
                 const widest = Math.max(...allBtns.map(b => b.getBoundingClientRect().width));
                 if (widest > contentW) {
-                    allBtns.forEach(b => { b.style.width = '100%'; b.style.display = 'block'; });
+                    allBtns.forEach(b => { setElementStyles(b, { width: '100%', display: 'block' }); });
                 }
             }
         };

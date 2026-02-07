@@ -25,6 +25,11 @@ Syncs Logseq favorites to Obsidian bookmarks. Handles duplicates and creates mis
 - Auto-formats new journal files
 - Customizable default backlinks query
 
+### TODO
+
+Page preview
+
+
 ## Quick Start
 
 1. Install plugin in `.obsidian/plugins/`
