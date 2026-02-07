@@ -3,15 +3,21 @@ import { checkLogseqSyntaxDOM } from './logseqSyntax';
 
 // Utility function for setting element styles (centralized for Obsidian best practices)
 function setElementStyles(el: HTMLElement, styles: Record<string, string>): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const style = el.style as any;
     Object.entries(styles).forEach(([key, value]) => {
-        style[key] = value;
+        const cssKey = key.replace(/([A-Z])/g, '-$1').toLowerCase();
+        el.style.setProperty(cssKey, value);
     });
 }
 
 // Interface for settings can be added here
 // Interface for settings
+interface BookmarkItem {
+    type: string;
+    path?: string;
+    ctime?: number;
+    [key: string]: unknown;
+}
+
 interface LogseqerSettings {
     enableSyntaxCheck: boolean;
     enableJournalNew: boolean;
@@ -145,12 +151,21 @@ export default class LogseqerPlugin extends Plugin {
     // Helper: Get Daily Notes Folder from Internal Plugin
     getDailyNoteFolder(): string {
         try {
-            const dailyNotesPlugin = (this.app as any).internalPlugins.getPluginById('daily-notes');
-            if (dailyNotesPlugin && dailyNotesPlugin.instance && dailyNotesPlugin.instance.options) {
-                return dailyNotesPlugin.instance.options.folder || 'journals';
+            const internalPlugins = (this.app as unknown as Record<string, unknown>).internalPlugins;
+            if (typeof internalPlugins === 'object' && internalPlugins !== null && 'getPluginById' in internalPlugins) {
+                const dailyNotesPlugin = (internalPlugins as Record<string, (id: string) => unknown>).getPluginById('daily-notes');
+                if (typeof dailyNotesPlugin === 'object' && dailyNotesPlugin !== null && 'instance' in dailyNotesPlugin) {
+                    const instance = (dailyNotesPlugin as Record<string, unknown>).instance;
+                    if (typeof instance === 'object' && instance !== null && 'options' in instance) {
+                        const options = (instance as Record<string, unknown>).options;
+                        if (typeof options === 'object' && options !== null && 'folder' in options) {
+                            return (options as Record<string, string>).folder || 'journals';
+                        }
+                    }
+                }
             }
-        } catch (e) {
-            console.warn("Logseqer: Could not retrieve Daily Notes Settings, falling back to 'journals'", e);
+        } catch (error) {
+            console.warn("Logseqer: Could not retrieve Daily Notes Settings, falling back to 'journals'", error);
         }
         return 'journals';
     }
@@ -226,13 +241,23 @@ export default class LogseqerPlugin extends Plugin {
                 let obsDailyFormat: string | null = null;
                 let obsDailyFolder: string | null = null;
                 try {
-                    const dnPlugin = (this.app as any).internalPlugins?.getPluginById?.('daily-notes');
-                    if (dnPlugin && dnPlugin.instance && dnPlugin.instance.options) {
-                        obsDailyFormat = dnPlugin.instance.options.format;
-                        obsDailyFolder = dnPlugin.instance.options.folder || 'journals';
+                    const dnPlugin = (this.app as unknown as Record<string, unknown>).internalPlugins;
+                    if (typeof dnPlugin === 'object' && dnPlugin !== null && 'getPluginById' in dnPlugin) {
+                        const dailyNotesObj = (dnPlugin as Record<string, (id: string) => unknown>).getPluginById('daily-notes');
+                        if (typeof dailyNotesObj === 'object' && dailyNotesObj !== null && 'instance' in dailyNotesObj) {
+                            const instance = (dailyNotesObj as Record<string, unknown>).instance;
+                            if (typeof instance === 'object' && instance !== null && 'options' in instance) {
+                                const options = (instance as Record<string, unknown>).options;
+                                if (typeof options === 'object' && options !== null) {
+                                    const opts = options as Record<string, string>;
+                                    obsDailyFormat = opts.format || null;
+                                    obsDailyFolder = opts.folder || null;
+                                }
+                            }
+                        }
                     }
-                } catch (e) {
-                    // ignore
+                } catch {
+                    // Fallback to config files
                 }
 
                 // Fallback to config files in .obsidian
@@ -244,7 +269,9 @@ export default class LogseqerPlugin extends Plugin {
                             const j = JSON.parse(txt);
                             obsDailyFormat = obsDailyFormat || j.format || null;
                             obsDailyFolder = obsDailyFolder || j.folder || null;
-                        } catch (e) {}
+                        } catch {
+                            // Unable to parse daily-notes.json
+                        }
                     }
                 }
 
@@ -258,7 +285,9 @@ export default class LogseqerPlugin extends Plugin {
                         const j = JSON.parse(txt);
                         appNewFileLocation = j.newFileLocation || null;
                         appNewFileFolderPath = j.newFileFolderPath || null;
-                    } catch (e) {}
+                    } catch {
+                        // Unable to read or parse app.json
+                    }
                 }
 
                 // Expected values for Logseq compatibility
@@ -305,8 +334,8 @@ export default class LogseqerPlugin extends Plugin {
                         fixData: { type: 'settings-update', target: 'daily-notes.json', key: 'format', value: expectedObsDailyFormat }
                     });
                 }
-            } catch (e) {
-                console.warn('Logseqer: folder settings check failed', e);
+            } catch (error) {
+                console.warn('Logseqer: folder settings check failed', error);
             }
         }
 
@@ -433,10 +462,11 @@ export default class LogseqerPlugin extends Plugin {
 
         try {
             // Read Obsidian bookmarks
-            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath));
+            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath)) as {items: BookmarkItem[]};
             const bookmarkedFiles = bookmarkContent.items
-                .filter((item: any) => item.type === 'file')
-                .map((item: any) => item.path);
+                .filter((item: BookmarkItem) => item.type === 'file')
+                .map((item: BookmarkItem) => item.path || '')
+                .filter((path: string) => path.length > 0);
             
             const obsidianPageNames = new Set<string>();
             for (const filePath of bookmarkedFiles) {
@@ -523,8 +553,8 @@ export default class LogseqerPlugin extends Plugin {
             }
 
             // Categorize Pages
-            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath));
-            const existingPaths = new Set(bookmarkContent.items.map((item: any) => item.path));
+            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath)) as {items: BookmarkItem[]};
+            const existingPaths = new Set(bookmarkContent.items.map((item: BookmarkItem) => item.path || '').filter((path: string) => path.length > 0));
 
             let addedDirectlyCount = 0;
             const missingPages: string[] = [];
@@ -595,10 +625,11 @@ export default class LogseqerPlugin extends Plugin {
         }
 
         try {
-            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath));
+            const bookmarkContent = JSON.parse(await adapter.read(bookmarkPath)) as {items: BookmarkItem[]};
             const bookmarkedFiles = bookmarkContent.items
-                .filter((item: any) => item.type === 'file')
-                .map((item: any) => item.path);
+                .filter((item: BookmarkItem) => item.type === 'file')
+                .map((item: BookmarkItem) => item.path || '')
+                .filter((path: string) => path.length > 0);
 
             if (bookmarkedFiles.length === 0) {
                 new Notice("No bookmarks found in Obsidian.");
@@ -921,8 +952,9 @@ class FolderSuggest {
         }
 
         this.suggestEl.empty();
+        const suggestEl = this.suggestEl;
         matches.forEach(folder => {
-            const item = this.suggestEl!.createDiv({ cls: 'suggestion-item', text: folder });
+            const item = suggestEl.createDiv({ cls: 'suggestion-item', text: folder });
             item.addEventListener('click', () => {
                 this.inputEl.value = folder;
                 this.inputEl.dispatchEvent(new Event('input'));
@@ -942,7 +974,7 @@ class FolderSuggest {
 class LogseqerSettingTab extends PluginSettingTab {
     plugin: LogseqerPlugin;
 
-    constructor(app: any, plugin: LogseqerPlugin) {
+    constructor(app: App, plugin: LogseqerPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
@@ -1414,8 +1446,8 @@ class BookmarkSyncModal extends Modal {
                 );
                 
                 if (pagesToAddToObsidian.length > 0) {
-                    const bookmarkContent = JSON.parse(await adapter.read(this.bookmarkPath));
-                    const existingPaths = new Set(bookmarkContent.items.map((item: any) => item.path));
+                    const bookmarkContent = JSON.parse(await adapter.read(this.bookmarkPath)) as {items: BookmarkItem[]};
+                    const existingPaths = new Set(bookmarkContent.items.map((item: BookmarkItem) => item.path || '').filter((path: string) => path.length > 0));
                     
                     // Build file map
                     const allFiles = this.app.vault.getMarkdownFiles();
@@ -1635,7 +1667,7 @@ class SyncResolutionModal extends Modal {
 
                 // Add to bookmarks (check if not already there, though unlikely for missing logic)
                 // Actually, duplicate check is good practice
-                const exists = bookmarkContent.items.some((i: any) => i.path === targetPath);
+                const exists = bookmarkContent.items.some((i: BookmarkItem) => i.path === targetPath);
                 if (!exists) {
                     bookmarkContent.items.push({
                         type: 'file',
@@ -1662,12 +1694,37 @@ class SyncResolutionModal extends Modal {
     }
 }
 
+interface FixDataBase {
+    type: string;
+}
+
+interface RenameFix extends FixDataBase {
+    type: 'rename' | 'namespace-rename';
+    newPath: string;
+    namespacePath?: string;
+    originalName?: string;
+}
+
+interface ContentReplaceFix extends FixDataBase {
+    type: 'content-replace';
+    content: string;
+}
+
+interface SettingsUpdateFix extends FixDataBase {
+    type: 'settings-update';
+    target: string;
+    key: string;
+    value: unknown;
+}
+
+type FixData = RenameFix | ContentReplaceFix | SettingsUpdateFix | null;
+
 interface VaultCheckIssue {
     file?: TFile; // Optional: Settings type issues don't need a specific file
     type: 'Date' | 'Namespace' | 'Task Marker' | 'Settings';
     description: string;
     suggestedFix: string;
-    fixData: any;
+    fixData: FixData;
 }
 
 class VaultCheckResolutionModal extends Modal {
@@ -1912,15 +1969,15 @@ class VaultCheckResolutionModal extends Modal {
                         const key = issue.fixData.key;
                         const value = issue.fixData.value;
                         const path = `${cfgDir}/${target}`;
-                        let data = {} as any;
+                        let data: Record<string, unknown> = {};
                         if (await adapter.exists(path)) {
                             const txt = await adapter.read(path);
-                            try { data = JSON.parse(txt); } catch (e) { data = {}; }
+                            try { data = JSON.parse(txt) as Record<string, unknown>; } catch { data = {}; }
                         }
                         data[key] = value;
                         await adapter.write(path, JSON.stringify(data, null, 2));
-                    } catch (e) {
-                        console.error('Failed to update settings file', e);
+                    } catch (error) {
+                        console.error('Failed to update settings file', error);
                     }
                 }
             } catch (e) {
