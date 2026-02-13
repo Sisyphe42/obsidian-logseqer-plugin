@@ -6,7 +6,7 @@ export function checkLogseqSyntaxDOM(): number {
 
   if (!noteContentElement) return 0;
 
-  const text = (noteContentElement as HTMLElement).innerText || '';
+  const text = noteContentElement?.innerText || '';
   const paragraphs = text.split("\n").filter((line: string) => line.trim() !== "");
   const ruleRegExp = /^(\t)*- /;
   let invalidCount = 0;
