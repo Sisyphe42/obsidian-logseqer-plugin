@@ -673,7 +673,7 @@ export default class LogseqerPlugin extends Plugin {
                 (existingFavorites.length > 0 ? `Note: ${existingFavorites.length} existing favorites will be preserved.` : '');
             
             new CustomConfirmationModal(this.app, message, () => {
-                (async () => {
+                void (async () => {
                     try {
                         // Re-read config to ensure we have the latest content
                         let currentConfigContent = await adapter.read(logseqConfigPath);
@@ -724,7 +724,7 @@ export default class LogseqerPlugin extends Plugin {
         // Check if leaf is valid and is a MarkdownView
         if (!leaf || !(leaf.view instanceof MarkdownView)) return;
 
-        const view = leaf.view as MarkdownView;
+        const view = leaf.view;
         const file = view.file;
         const journalFolder = this.getDailyNoteFolder();
 
@@ -795,7 +795,7 @@ export default class LogseqerPlugin extends Plugin {
             this.statusBarItem.removeClass('is-valid');
             this.statusBarItem.addClass('is-invalid');
         }
-        this.statusBarItem.title = "LS Syntax Check";
+        this.statusBarItem.title = "LS syntax check";
     }
 
     createDevButton() {
@@ -860,7 +860,7 @@ class DeveloperModal extends Modal {
 
         const btn1 = contentEl.createEl('button', { text: 'Show test notice' });
         btn1.onclick = () => {
-            new Notice('This is a test notice from Developer Mode.');
+            new Notice('This is a test notice from developer mode.');
         };
 
         const btn2 = contentEl.createEl('button', { text: 'Vault check with issues' });
@@ -991,7 +991,7 @@ class LogseqerSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        new Setting(containerEl).setName('Logseqer plugin settings').setHeading();
+        new Setting(containerEl).setName('General').setHeading();
 
         new Setting(containerEl)
             .setName('Syntax check')
@@ -1103,7 +1103,7 @@ class LogseqerSettingTab extends PluginSettingTab {
                 dropdown
                     .addOption('obsidian-to-logseq', 'Obsidian → Logseq')
                     .addOption('logseq-to-obsidian', 'Logseq → Obsidian')
-                    .addOption('bidirectional', 'Bidirectional (Both ways)')
+                    .addOption('bidirectional', 'Bidirectional (both ways)')
                     .setValue(this.plugin.settings.bookmarkSyncDirection || 'obsidian-to-logseq')
                     .onChange(async (value: 'obsidian-to-logseq' | 'logseq-to-obsidian' | 'bidirectional') => {
                         this.plugin.settings.bookmarkSyncDirection = value;
@@ -1132,7 +1132,7 @@ class LogseqerSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Backlink default query')
-            .setDesc('Automatically set a search query in backlinks for Journals.')
+            .setDesc('Automatically set a search query in backlinks for journals.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableBacklinkQuery)
                 .onChange(async (value) => {
@@ -1163,7 +1163,7 @@ class LogseqerSettingTab extends PluginSettingTab {
                 .onClick(() => {
                     // Confirmation dialog
                     new CustomConfirmationModal(this.app, 'Are you sure you want to restore all settings to default values? This cannot be undone.', () => {
-                        (async () => {
+                        void (async () => {
                             this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
                             await this.plugin.saveSettings();
                             this.display(); // Refresh the settings display
@@ -1174,7 +1174,7 @@ class LogseqerSettingTab extends PluginSettingTab {
         // Developer Mode (last item in Advanced)
         const devModeSetting = new Setting(containerEl)
             .setName('Dev mode')
-            .setDesc('WARNING: Adds a dev button to the status bar for testing features. Not recommended for production use.');
+            .setDesc('Warning: Adds a dev button to the status bar for testing features. Not recommended for production use.');
 
         if (this.plugin.settings.developerMode) {
             devModeSetting.addButton(button => button
@@ -1328,7 +1328,7 @@ class BookmarkSyncModal extends Modal {
             text: `To Add (${toAddItems.length})`,
             cls: 'logseqer-sync-header'
         });
-        const toAddHeaderCheckbox = toAddHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' }) as HTMLInputElement;
+        const toAddHeaderCheckbox = toAddHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' });
         toAddHeaderCheckbox.disabled = !canModify;
         toAddHeaderCheckbox.checked = canModify && toAddItems.length > 0 && 
             toAddItems.every(p => this.selectedToAdd.has(p));
@@ -1351,7 +1351,7 @@ class BookmarkSyncModal extends Modal {
             labelDiv.setText(page);
             
             const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
-            const checkbox = controlDiv.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+            const checkbox = controlDiv.createEl('input', { type: 'checkbox' });
             checkbox.disabled = !canModify;
             checkbox.checked = this.selectedToAdd.has(page);
             checkbox.onchange = () => {
@@ -1379,7 +1379,7 @@ class BookmarkSyncModal extends Modal {
             text: `Existing (${currentPages.length})`,
             cls: 'logseqer-sync-header'
         });
-        const existingHeaderCheckbox = existingHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' }) as HTMLInputElement;
+        const existingHeaderCheckbox = existingHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' });
         existingHeaderCheckbox.disabled = true; // Existing items are read-only
         existingHeaderCheckbox.checked = currentPages.length > 0;
         
@@ -1391,7 +1391,7 @@ class BookmarkSyncModal extends Modal {
             labelDiv.setText(page);
             
             const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
-            const checkbox = controlDiv.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+            const checkbox = controlDiv.createEl('input', { type: 'checkbox' });
             checkbox.disabled = true; // Existing items are read-only
             checkbox.checked = true;
         });
@@ -1574,7 +1574,7 @@ class SyncResolutionModal extends Modal {
     onOpen() {
         const { contentEl } = this;
         contentEl.createEl('h2', { text: 'Sync Logseq favorites' });
-        contentEl.createEl('p', { text: 'Review changes to your Obsidian Bookmarks.', cls: 'logseqer-sync-desc' });
+        contentEl.createEl('p', { text: 'Review changes to your Obsidian bookmarks.', cls: 'logseqer-sync-desc' });
 
         // Section: Ambiguous (Duplicates)
         if (this.ambiguousPages.length > 0) {
@@ -1774,7 +1774,7 @@ class VaultCheckResolutionModal extends Modal {
             header.createSpan({ text: `${type} (${items.length})`, cls: 'logseqer-sync-header' });
 
             // Group select checkbox (aligned right)
-            const groupCheckbox = header.createEl('input', { type: 'checkbox', cls: 'group-checkbox' }) as HTMLInputElement;
+            const groupCheckbox = header.createEl('input', { type: 'checkbox', cls: 'group-checkbox' });
             groupCheckbox.checked = items.every(it => this.selectedIssues.has(it));
             groupCheckbox.onchange = () => {
                 if (groupCheckbox.checked) items.forEach(it => { if (it.fixData) this.selectedIssues.add(it); });
@@ -1819,7 +1819,7 @@ class VaultCheckResolutionModal extends Modal {
 
                 if (issue.fixData) {
                     const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
-                    const checkbox = controlDiv.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+                    const checkbox = controlDiv.createEl('input', { type: 'checkbox' });
                     checkbox.checked = this.selectedIssues.has(issue);
                     checkbox.onchange = (e) => {
                         if ((e.target as HTMLInputElement).checked) this.selectedIssues.add(issue);
@@ -1854,7 +1854,7 @@ class VaultCheckResolutionModal extends Modal {
                 return;
             }
             new CustomConfirmationModal(this.app, 'Apply selected fixes? This will modify files in your vault.', () => {
-                (async () => {
+                void (async () => {
                     await this.applyFixes();
                     this.close();
                 })();
