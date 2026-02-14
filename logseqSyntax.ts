@@ -2,11 +2,11 @@
 export function checkLogseqSyntaxDOM(): number {
   const noteContentElement = document.querySelector(
     "body > div.app-container > div.horizontal-main-container > div > div.workspace-split.mod-vertical.mod-root > div > div.workspace-tab-container > div > div > div.view-content > div.markdown-source-view.cm-s-obsidian.mod-cm6.node-insert-event.is-folding.show-properties.is-live-preview > div > div.cm-scroller > div.cm-sizer > div.cm-contentContainer > div.cm-content.cm-lineWrapping"
-  ) as HTMLElement | null;
+  );
 
-  if (!noteContentElement) return 0;
+  if (!noteContentElement || !(noteContentElement instanceof HTMLElement)) return 0;
 
-  const text = noteContentElement?.innerText || '';
+  const text = noteContentElement.innerText || '';
   const paragraphs = text.split("\n").filter((line: string) => line.trim() !== "");
   const ruleRegExp = /^(\t)*- /;
   let invalidCount = 0;
