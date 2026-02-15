@@ -1,7 +1,7 @@
 {
     "id": "logseqer",
     "name": "Logseqer",
-    "version": "0.1.0",
+    "version": "0.7.0",
     "description": "Provides a Logseq-native experience and enhance workflow compatibility between both applications.",
     "minAppVersion": "1.11.0",
     "author": "sisyphe42",
