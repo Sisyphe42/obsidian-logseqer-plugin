@@ -28,6 +28,7 @@ Syncs Logseq favorites to Obsidian bookmarks. Handles duplicates and creates mis
 ### TODO
 
 1. Page preview
+2. clear unused journals
 
 ## Quick Start
 
