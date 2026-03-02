@@ -1,5 +1,31 @@
-import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component } from 'obsidian';
+import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component, getLanguage } from 'obsidian';
 import { checkLogseqSyntaxDOM } from './logseqSyntax';
+import zhCN from './i18n/zh-CN';
+import en from './i18n/en';
+
+type SupportedLocale = 'zh-CN' | 'en';
+type LocaleSetting = 'auto' | SupportedLocale;
+
+const I18N: Record<SupportedLocale, Record<string, string>> = {
+    'zh-CN': zhCN,
+    en,
+};
+
+function resolveLocale(setting: LocaleSetting, appLocale: string): SupportedLocale {
+    if (setting === 'zh-CN' || setting === 'en') return setting;
+    const normalized = appLocale.toLowerCase();
+    return normalized.startsWith('zh') ? 'zh-CN' : 'en';
+}
+
+function interpolate(text: string, vars?: Record<string, string | number>): string {
+    if (!vars) return text;
+    return text.replace(/\{(\w+)\}/g, (_m, key: string) => String(vars[key] ?? `{${key}}`));
+}
+
+function t(locale: SupportedLocale, key: string, vars?: Record<string, string | number>): string {
+    const str = I18N[locale][key] ?? I18N.en[key] ?? key;
+    return interpolate(str, vars);
+}
 
 // Utility function for setting element styles (centralized for Obsidian best practices)
 function setElementStyles(el: HTMLElement, styles: Record<string, string>): void {
@@ -25,6 +51,7 @@ interface MockFile {
 }
 
 interface LogseqerSettings {
+    locale?: LocaleSetting;
     enableSyntaxCheck: boolean;
     enableJournalNew: boolean;
     enableBacklinkQuery: boolean;
@@ -41,6 +68,7 @@ interface LogseqerSettings {
 }
 
 const DEFAULT_SETTINGS: LogseqerSettings = {
+    locale: 'auto',
     enableSyntaxCheck: true,
     enableJournalNew: true,
     enableBacklinkQuery: true,
@@ -58,8 +86,20 @@ const DEFAULT_SETTINGS: LogseqerSettings = {
 
 export default class LogseqerPlugin extends Plugin {
     settings: LogseqerSettings;
+    locale: SupportedLocale = 'en';
     statusBarItem: HTMLElement;
     devStatusBarItem: HTMLElement | null = null;
+
+    tr(key: string, vars?: Record<string, string | number>): string {
+        if ((this.settings.locale || 'auto') === 'auto') {
+            this.locale = resolveLocale('auto', getLanguage());
+        }
+        return t(this.locale, key, vars);
+    }
+
+    notify(key: string, vars?: Record<string, string | number>) {
+        new Notice(this.tr(key, vars));
+    }
 
     async onload() {
         await this.loadSettings();
@@ -97,7 +137,7 @@ export default class LogseqerPlugin extends Plugin {
         if (this.settings.enableVaultCommand) {
             this.addCommand({
                 id: 'check-vault',
-                name: 'Check vault compatibility',
+                name: this.tr('command.checkVault'),
                 callback: () => {
                     void this.runVaultCheckCommand();
                 }
@@ -108,7 +148,7 @@ export default class LogseqerPlugin extends Plugin {
         if (this.settings.enableSyncCommand) {
             this.addCommand({
                 id: 'sync-settings',
-                name: 'Sync settings (bookmarks/favorites)',
+                name: this.tr('command.syncSettings'),
                 callback: () => {
                     void this.syncSettings();
                 }
@@ -148,6 +188,7 @@ export default class LogseqerPlugin extends Plugin {
 
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        this.locale = resolveLocale(this.settings.locale || 'auto', getLanguage());
     }
 
     async saveSettings() {
@@ -195,13 +236,13 @@ export default class LogseqerPlugin extends Plugin {
     // 2. Feature: Vault Check helper (manual only)
     checkVault() {
         // Manual only - no startup behavior
-        new Notice("Run 'Check vault compatibility' from the command palette to inspect vault.");
+        this.notify('notice.vaultCommandHint');
     }
 
     async runVaultCheckCommand() {
         console.warn("Logseqer: Starting Vault Check...");
 
-        new Notice("Vault check started...");
+        this.notify('notice.vaultCheckStarted');
 
         const files = this.app.vault.getMarkdownFiles();
         const issues: VaultCheckIssue[] = [];
@@ -409,9 +450,9 @@ export default class LogseqerPlugin extends Plugin {
         } else {
             // Show a modal that requires manual close to indicate success
             const modal = new Modal(this.app);
-            modal.titleEl.setText('Vault check');
-            modal.contentEl.createEl('p', { text: 'Vault check completed. No issues found.' });
-            const btn = modal.contentEl.createEl('button', { text: 'Close', cls: 'mod-cta' });
+            modal.titleEl.setText(this.tr('issue.vaultCheck'));
+            modal.contentEl.createEl('p', { text: this.tr('issue.vaultCheckFoundNone') });
+            const btn = modal.contentEl.createEl('button', { text: this.tr('modal.close'), cls: 'mod-cta' });
             btn.onclick = () => modal.close();
             modal.open();
         }
@@ -457,12 +498,12 @@ export default class LogseqerPlugin extends Plugin {
         const logseqConfigPath = `${this.settings.logseqFolder}/config.edn`;
 
         if (!(await adapter.exists(bookmarkPath))) {
-            new Notice(`Obsidian bookmarks not found at ${bookmarkPath}`);
+            this.notify('notice.bookmarksNotFound', { path: bookmarkPath });
             return;
         }
 
         if (!(await adapter.exists(logseqConfigPath))) {
-            new Notice(`Logseq config not found at ${logseqConfigPath}`);
+            this.notify('notice.logseqConfigNotFound', { path: logseqConfigPath });
             return;
         }
 
@@ -509,7 +550,7 @@ export default class LogseqerPlugin extends Plugin {
 
         } catch (e) {
             console.error("Logseqer: Error preparing bookmark sync", e);
-            new Notice("Error preparing bookmark sync. See console.");
+            this.notify('notice.errorPreparingBookmarkSync');
         }
     }
 
@@ -520,12 +561,12 @@ export default class LogseqerPlugin extends Plugin {
         const logseqConfigPath = `${this.settings.logseqFolder}/config.edn`;
 
         if (!(await adapter.exists(logseqConfigPath))) {
-            new Notice(`Logseq config not found at ${logseqConfigPath}`);
+            this.notify('notice.logseqConfigNotFound', { path: logseqConfigPath });
             return;
         }
 
         if (!(await adapter.exists(bookmarkPath))) {
-            new Notice(`Obsidian bookmarks not found at ${bookmarkPath}`);
+            this.notify('notice.bookmarksNotFound', { path: bookmarkPath });
             return;
         }
 
@@ -535,7 +576,7 @@ export default class LogseqerPlugin extends Plugin {
             const match = configContent.match(favoritesRegex);
 
             if (!match) {
-                new Notice("No :favorites found in Logseq config.");
+                this.notify('notice.noFavoritesFound');
                 return;
             }
 
@@ -543,7 +584,7 @@ export default class LogseqerPlugin extends Plugin {
             const pages = favoritesStr.match(/"([^"]+)"/g)?.map(s => s.replace(/"/g, '')) || [];
 
             if (pages.length === 0) {
-                new Notice("No pages found in Logseq favorites.");
+                this.notify('notice.noPagesInFavorites');
                 return;
             }
 
@@ -593,7 +634,7 @@ export default class LogseqerPlugin extends Plugin {
 
             if (addedDirectlyCount > 0) {
                 await adapter.write(bookmarkPath, JSON.stringify(bookmarkContent, null, 2));
-                new Notice(`Synced ${addedDirectlyCount} favorites from Logseq to Obsidian.`);
+                this.notify('notice.syncedFavoritesToObsidian', { count: addedDirectlyCount });
             }
 
             if (missingPages.length > 0 || ambiguousPages.length > 0) {
@@ -605,12 +646,12 @@ export default class LogseqerPlugin extends Plugin {
                     bookmarkPath
                 ).open();
             } else if (addedDirectlyCount === 0) {
-                new Notice("Bookmarks are up to date.");
+                this.notify('notice.bookmarksUpToDate');
             }
 
         } catch (e) {
             console.error("Logseqer: Error syncing from Logseq to Obsidian", e);
-            new Notice("Error syncing from Logseq to Obsidian. See console.");
+            this.notify('notice.errorSyncLogseqToObsidian');
         }
     }
 
@@ -621,12 +662,12 @@ export default class LogseqerPlugin extends Plugin {
         const logseqConfigPath = `${this.settings.logseqFolder}/config.edn`;
 
         if (!(await adapter.exists(bookmarkPath))) {
-            new Notice(`Obsidian bookmarks not found at ${bookmarkPath}`);
+            this.notify('notice.bookmarksNotFound', { path: bookmarkPath });
             return;
         }
 
         if (!(await adapter.exists(logseqConfigPath))) {
-            new Notice(`Logseq config not found at ${logseqConfigPath}`);
+            this.notify('notice.logseqConfigNotFound', { path: logseqConfigPath });
             return;
         }
 
@@ -638,7 +679,7 @@ export default class LogseqerPlugin extends Plugin {
                 .filter((path: string) => path.length > 0);
 
             if (bookmarkedFiles.length === 0) {
-                new Notice("No bookmarks found in Obsidian.");
+                this.notify('notice.noBookmarksFoundInObsidian');
                 return;
             }
 
@@ -662,7 +703,7 @@ export default class LogseqerPlugin extends Plugin {
             const newFavorites = pageNamesArray.filter(name => !existingFavorites.includes(name));
             
             if (newFavorites.length === 0) {
-                new Notice("All bookmarks are already in Logseq favorites.");
+                this.notify('notice.allBookmarksInLogseq');
                 return;
             }
             
@@ -698,17 +739,17 @@ export default class LogseqerPlugin extends Plugin {
                         }
 
                         await adapter.write(logseqConfigPath, currentConfigContent);
-                        new Notice(`Added ${sortedNewFavorites.length} new bookmarks to Logseq favorites (${existingFavorites.length} existing preserved).`);
+                        this.notify('notice.addedBookmarksToLogseq', { count: sortedNewFavorites.length, existing: existingFavorites.length });
                     } catch (e) {
                         console.error("Logseqer: Error syncing from Obsidian to Logseq", e);
-                        new Notice("Error syncing from Obsidian to Logseq. See console.");
+                        this.notify('notice.errorSyncObsidianToLogseq');
                     }
                 })();
-            }).open();
+            }, this).open();
 
         } catch (e) {
             console.error("Logseqer: Error syncing from Obsidian to Logseq", e);
-            new Notice("Error syncing from Obsidian to Logseq. See console.");
+            this.notify('notice.errorSyncObsidianToLogseq');
         }
     }
 
@@ -795,14 +836,14 @@ export default class LogseqerPlugin extends Plugin {
             this.statusBarItem.removeClass('is-valid');
             this.statusBarItem.addClass('is-invalid');
         }
-        this.statusBarItem.title = "LS syntax check";
+        this.statusBarItem.title = this.tr('status.syntaxCheckTitle');
     }
 
     createDevButton() {
         if (this.devStatusBarItem) return;
         this.devStatusBarItem = this.addStatusBarItem();
         this.devStatusBarItem.addClass('logseqer-dev-item');
-        this.devStatusBarItem.setText('Dev');
+        this.devStatusBarItem.setText(this.tr('settings.devMode'));
         this.devStatusBarItem.onclick = () => {
             new DeveloperModal(this.app, this).open();
         };
@@ -817,11 +858,13 @@ export default class LogseqerPlugin extends Plugin {
 
 // Custom Confirmation Modal
 class CustomConfirmationModal extends Modal {
+    plugin?: LogseqerPlugin;
     onConfirm: () => void;
     message: string;
 
-    constructor(app: App, message: string, onConfirm: () => void) {
+    constructor(app: App, message: string, onConfirm: () => void, plugin?: LogseqerPlugin) {
         super(app);
+        this.plugin = plugin;
         this.message = message;
         this.onConfirm = onConfirm;
     }
@@ -831,13 +874,13 @@ class CustomConfirmationModal extends Modal {
         contentEl.createEl('p', { text: this.message });
         
         const btnDiv = contentEl.createDiv({ cls: 'modal-button-container' });
-        const confirmBtn = btnDiv.createEl('button', { text: 'Confirm', cls: 'mod-cta' });
+        const confirmBtn = btnDiv.createEl('button', { text: this.plugin?.tr('modal.confirm') ?? 'Confirm', cls: 'mod-cta' });
         confirmBtn.onclick = () => {
             this.onConfirm();
             this.close();
         };
 
-        const cancelBtn = btnDiv.createEl('button', { text: 'Cancel' });
+        const cancelBtn = btnDiv.createEl('button', { text: this.plugin?.tr('modal.cancel') ?? 'Cancel' });
         cancelBtn.onclick = () => this.close();
     }
 
@@ -855,32 +898,32 @@ class DeveloperModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h3', { text: 'Developer tools' });
-        contentEl.createEl('p', { text: 'Use these controls to show test notifications and dialogs that users see.' });
+        contentEl.createEl('h3', { text: this.plugin.tr('modal.developerTools') });
+        contentEl.createEl('p', { text: this.plugin.tr('modal.developerHelp') });
 
-        const btn1 = contentEl.createEl('button', { text: 'Show test notice' });
+        const btn1 = contentEl.createEl('button', { text: this.plugin.tr('modal.showTestNotice') });
         btn1.onclick = () => {
-            new Notice('This is a test notice from developer mode.');
+            this.plugin.notify('notice.testNotice');
         };
 
-        const btn2 = contentEl.createEl('button', { text: 'Vault check with issues' });
+        const btn2 = contentEl.createEl('button', { text: this.plugin.tr('modal.vaultCheckWithIssues') });
         btn2.onclick = () => {
             // Open a dry-run simulation of the Vault Check UI (no real file changes)
             void this.plugin.runVaultCheckSimulation();
         };
 
-        const btn2b = contentEl.createEl('button', { text: 'Vault check with no issues' });
+        const btn2b = contentEl.createEl('button', { text: this.plugin.tr('modal.vaultCheckNoIssuesBtn') });
         btn2b.onclick = () => {
             // Show the success modal that indicates no issues found
             const modal = new Modal(this.app);
-            modal.titleEl.setText('Vault check');
-            modal.contentEl.createEl('p', { text: 'Vault check completed. No issues found.' });
-            const btn = modal.contentEl.createEl('button', { text: 'Close', cls: 'mod-cta' });
+            modal.titleEl.setText(this.plugin.tr('issue.vaultCheck'));
+            modal.contentEl.createEl('p', { text: this.plugin.tr('issue.vaultCheckFoundNone') });
+            const btn = modal.contentEl.createEl('button', { text: this.plugin.tr('modal.close'), cls: 'mod-cta' });
             btn.onclick = () => modal.close();
             modal.open();
         };
 
-        const btn3 = contentEl.createEl('button', { text: 'Sync resolution' });
+        const btn3 = contentEl.createEl('button', { text: this.plugin.tr('modal.syncResolution') });
         btn3.onclick = () => {
             // Provide sample data for ambiguous/missing pages (dry-run)
             const missing = ['Sample Page A', 'New Page B'];
@@ -890,7 +933,7 @@ class DeveloperModal extends Modal {
             new SyncResolutionModal(this.app, this.plugin, missing, ambiguous, `${this.plugin.app.vault.configDir}/bookmarks.json`, true).open();
         };
 
-        const del = contentEl.createEl('button', { text: 'Remove dev button' });
+        const del = contentEl.createEl('button', { text: this.plugin.tr('modal.removeDevButton') });
         del.onclick = async () => {
             this.plugin.removeDevButton();
             this.close();
@@ -991,11 +1034,30 @@ class LogseqerSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        new Setting(containerEl).setName('Logseq formatting').setHeading();
+        new Setting(containerEl).setName(this.plugin.tr('settings.general')).setHeading();
 
         new Setting(containerEl)
-            .setName('Syntax check')
-            .setDesc('Show syntax check status in status bar.')
+            .setName(`🌐 ${this.plugin.tr('settings.language')}`)
+            .setDesc(this.plugin.tr('settings.languageDesc'))
+            .addDropdown(dropdown => {
+                dropdown
+                    .addOption('auto', this.plugin.tr('settings.language.auto'))
+                    .addOption('zh-CN', this.plugin.tr('settings.language.zhCN'))
+                    .addOption('en', this.plugin.tr('settings.language.en'))
+                    .setValue(this.plugin.settings.locale || 'auto')
+                    .onChange(async (value: LocaleSetting) => {
+                        this.plugin.settings.locale = value;
+                        this.plugin.locale = resolveLocale(value, getLanguage());
+                        await this.plugin.saveSettings();
+                        this.display();
+                    });
+            });
+
+        new Setting(containerEl).setName(this.plugin.tr('settings.logseqFormatting')).setHeading();
+
+        new Setting(containerEl)
+            .setName(this.plugin.tr('settings.syntaxCheck'))
+            .setDesc(this.plugin.tr('settings.syntaxCheckDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableSyntaxCheck)
                 .onChange(async (value) => {
@@ -1005,8 +1067,8 @@ class LogseqerSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('New journal format')
-            .setDesc('Automatically prepend "- " to new journal files.')
+            .setName(this.plugin.tr('settings.newJournalFormat'))
+            .setDesc(this.plugin.tr('settings.newJournalFormatDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableJournalNew)
                 .onChange(async (value) => {
@@ -1014,12 +1076,12 @@ class LogseqerSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        new Setting(containerEl).setName('Vault check').setHeading();
+        new Setting(containerEl).setName(this.plugin.tr('settings.vaultCheckHeading')).setHeading();
 
         // Parent: Vault Check command with collapsible subfeatures
         new Setting(containerEl)
-            .setName('Vault check')
-            .setDesc('Show the "Check vault compatibility" command in the command palette.')
+            .setName(this.plugin.tr('settings.vaultCheck'))
+            .setDesc(this.plugin.tr('settings.vaultCheckDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableVaultCommand ?? true)
                 .onChange(async (value) => {
@@ -1035,8 +1097,8 @@ class LogseqerSettingTab extends PluginSettingTab {
 
         // Date format check (reads Logseq :journal/page-title-format from config.edn)
         new Setting(vaultSubContainer)
-            .setName('Date format check')
-            .setDesc('Read Logseq config.edn for :journal/page-title-format and compare with Obsidian daily note format.')
+            .setName(this.plugin.tr('settings.dateFormatCheck'))
+            .setDesc(this.plugin.tr('settings.dateFormatCheckDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableVaultDateCheck ?? true)
                 .setDisabled(!parentEnabled)
@@ -1047,8 +1109,8 @@ class LogseqerSettingTab extends PluginSettingTab {
 
         // Folder settings check (journals/pages mappings)
         new Setting(vaultSubContainer)
-            .setName('Folder settings check')
-            .setDesc('Verify Obsidian daily notes and new-file folder settings match Logseq expectations (journals/pages).')
+            .setName(this.plugin.tr('settings.folderSettingsCheck'))
+            .setDesc(this.plugin.tr('settings.folderSettingsCheckDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableVaultFolderSettingsCheck ?? true)
                 .setDisabled(!parentEnabled)
@@ -1059,8 +1121,8 @@ class LogseqerSettingTab extends PluginSettingTab {
 
         // Namespace check
         new Setting(vaultSubContainer)
-            .setName('Namespace checks')
-            .setDesc('Detect files with "___" separator (e.g., "a___b___c.md") and convert to "c.md" with "tags: a/b" at the beginning.')
+            .setName(this.plugin.tr('settings.namespaceChecks'))
+            .setDesc(this.plugin.tr('settings.namespaceChecksDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableVaultNamespaceCheck ?? true)
                 .setDisabled(!parentEnabled)
@@ -1071,8 +1133,8 @@ class LogseqerSettingTab extends PluginSettingTab {
 
         // Task marker check
         new Setting(vaultSubContainer)
-            .setName('Task marker checks')
-            .setDesc('Detect common Logseq task markers (TODO/DONE/DOING/etc.).')
+            .setName(this.plugin.tr('settings.taskMarkerChecks'))
+            .setDesc(this.plugin.tr('settings.taskMarkerChecksDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableVaultTaskMarkerCheck ?? true)
                 .setDisabled(!parentEnabled)
@@ -1081,12 +1143,12 @@ class LogseqerSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        new Setting(containerEl).setName('Bookmark sync').setHeading();
+        new Setting(containerEl).setName(this.plugin.tr('settings.bookmarkSyncHeading')).setHeading();
 
         // Sync command toggle
         new Setting(containerEl)
-            .setName('Sync settings')
-            .setDesc('Show the "Sync settings" command in the command palette.')
+            .setName(this.plugin.tr('settings.syncSettings'))
+            .setDesc(this.plugin.tr('settings.syncSettingsDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableSyncCommand ?? true)
                 .onChange(async (value) => {
@@ -1097,13 +1159,13 @@ class LogseqerSettingTab extends PluginSettingTab {
 
         // Sync direction setting
         new Setting(containerEl)
-            .setName('Sync direction')
-            .setDesc('Choose the direction for bookmark synchronization.')
+            .setName(this.plugin.tr('settings.syncDirection'))
+            .setDesc(this.plugin.tr('settings.syncDirectionDesc'))
             .addDropdown(dropdown => {
                 dropdown
-                    .addOption('obsidian-to-logseq', 'Obsidian → Logseq')
-                    .addOption('logseq-to-obsidian', 'Logseq → Obsidian')
-                    .addOption('bidirectional', 'Bidirectional (both ways)')
+                    .addOption('obsidian-to-logseq', this.plugin.tr('modal.syncDirection.obsidianToLogseq'))
+                    .addOption('logseq-to-obsidian', this.plugin.tr('modal.syncDirection.logseqToObsidian'))
+                    .addOption('bidirectional', this.plugin.tr('settings.syncDirection.bidirectional'))
                     .setValue(this.plugin.settings.bookmarkSyncDirection || 'obsidian-to-logseq')
                     .onChange(async (value: 'obsidian-to-logseq' | 'logseq-to-obsidian' | 'bidirectional') => {
                         this.plugin.settings.bookmarkSyncDirection = value;
@@ -1114,8 +1176,8 @@ class LogseqerSettingTab extends PluginSettingTab {
         // Logseq Folder Setting with Folder Suggest
         let logseqInput: TextComponent;
         new Setting(containerEl)
-            .setName('Logseq folder')
-            .setDesc('Folder containing Logseq files (config.edn)')
+            .setName(this.plugin.tr('settings.logseqFolder'))
+            .setDesc(this.plugin.tr('settings.logseqFolderDesc'))
             .addText(text => {
                 logseqInput = text;
                 text.setValue(this.plugin.settings.logseqFolder)
@@ -1128,11 +1190,11 @@ class LogseqerSettingTab extends PluginSettingTab {
         // Attach folder suggest to input
         new FolderSuggest(this.app, logseqInput.inputEl);
 
-        new Setting(containerEl).setName('Backlinks customization').setHeading();
+        new Setting(containerEl).setName(this.plugin.tr('settings.backlinksHeading')).setHeading();
 
         new Setting(containerEl)
-            .setName('Backlink default query')
-            .setDesc('Automatically set a search query in backlinks for journals.')
+            .setName(this.plugin.tr('settings.backlinkDefaultQuery'))
+            .setDesc(this.plugin.tr('settings.backlinkDefaultQueryDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableBacklinkQuery)
                 .onChange(async (value) => {
@@ -1141,8 +1203,8 @@ class LogseqerSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Default query')
-            .setDesc('The query string to input into the backlinks search box. Example: -path:"journals/Journaling"')
+            .setName(this.plugin.tr('settings.defaultQuery'))
+            .setDesc(this.plugin.tr('settings.defaultQueryDesc'))
             .addText(text => text
                 .setPlaceholder('-path:"journals/Journaling"')
                 .setValue(this.plugin.settings.backlinkQueryString)
@@ -1152,33 +1214,33 @@ class LogseqerSettingTab extends PluginSettingTab {
                 }));
 
         // Reset to Defaults Button
-        new Setting(containerEl).setName('Advanced').setHeading();
+        new Setting(containerEl).setName(this.plugin.tr('settings.advanced')).setHeading();
 
         new Setting(containerEl)
-            .setName('Restore defaults')
-            .setDesc('Reset all plugin settings to their default values')
+            .setName(this.plugin.tr('settings.restoreDefaults'))
+            .setDesc(this.plugin.tr('settings.restoreDefaultsDesc'))
             .addButton(button => button
-                .setButtonText('Restore defaults')
+                .setButtonText(this.plugin.tr('settings.restoreDefaultsBtn'))
                 .setWarning()
                 .onClick(() => {
                     // Confirmation dialog
-                    new CustomConfirmationModal(this.app, 'Are you sure you want to restore all settings to default values? This cannot be undone.', () => {
+                    new CustomConfirmationModal(this.app, this.plugin.tr('settings.restoreDefaultsConfirm'), () => {
                         void (async () => {
                             this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
                             await this.plugin.saveSettings();
                             this.display(); // Refresh the settings display
-                            new Notice('Settings restored to defaults');
+                            this.plugin.notify('notice.settingsRestored');
                         })();
-                    }).open();
+                    }, this.plugin).open();
                 }));
         // Developer Mode (last item in Advanced)
         const devModeSetting = new Setting(containerEl)
-            .setName('Dev mode')
-            .setDesc('Warning: Adds a dev button to the status bar for testing features. Not recommended for production use.');
+            .setName(this.plugin.tr('settings.devMode'))
+            .setDesc(this.plugin.tr('settings.devModeDesc'));
 
         if (this.plugin.settings.developerMode) {
             devModeSetting.addButton(button => button
-                .setButtonText('Disable')
+                .setButtonText(this.plugin.tr('settings.disable'))
                 .setWarning()
                 .onClick(async () => {
                     this.plugin.settings.developerMode = false;
@@ -1188,7 +1250,7 @@ class LogseqerSettingTab extends PluginSettingTab {
                 }));
         } else {
             devModeSetting.addButton(button => button
-                .setButtonText('Enable')
+                .setButtonText(this.plugin.tr('settings.enable'))
                 .setWarning()
                 .onClick(async () => {
                     this.plugin.settings.developerMode = true;
@@ -1209,6 +1271,8 @@ class BookmarkSyncModal extends Modal {
     canModifyObsidian: boolean;
     canModifyLogseq: boolean;
     direction: string;
+    tr: (key: string, vars?: Record<string, string | number>) => string;
+    notify: (key: string, vars?: Record<string, string | number>) => void;
     
     // State
     currentView: 'obsidian' | 'logseq';
@@ -1235,6 +1299,8 @@ class BookmarkSyncModal extends Modal {
         this.canModifyObsidian = canModifyObsidian;
         this.canModifyLogseq = canModifyLogseq;
         this.direction = direction;
+        this.tr = plugin.tr.bind(plugin);
+        this.notify = plugin.notify.bind(plugin);
         
         // Default view based on direction
         this.currentView = direction === 'logseq-to-obsidian' ? 'logseq' : 'obsidian';
@@ -1274,14 +1340,14 @@ class BookmarkSyncModal extends Modal {
         contentEl.empty();
         
         // Title with sync direction
-        const directionText = this.direction === 'bidirectional' ? 'Bidirectional Sync' :
-                             this.direction === 'logseq-to-obsidian' ? 'Logseq → Obsidian' :
-                             'Obsidian → Logseq';
-        contentEl.createEl('h2', { text: `Bookmark Sync: ${directionText}` });
+        const directionText = this.direction === 'bidirectional' ? this.tr('modal.syncDirection.bidirectional') :
+                             this.direction === 'logseq-to-obsidian' ? this.tr('modal.syncDirection.logseqToObsidian') :
+                             this.tr('modal.syncDirection.obsidianToLogseq');
+        contentEl.createEl('h2', { text: this.tr('modal.bookmarkSyncTitle', { direction: directionText }) });
         
         // Description
         contentEl.createEl('p', { 
-            text: `Select bookmarks to sync. Switch between Obsidian and Logseq views using the buttons below.`,
+            text: this.tr('modal.bookmarkSyncDesc'),
             cls: 'logseqer-sync-desc' 
         });
         
@@ -1325,7 +1391,7 @@ class BookmarkSyncModal extends Modal {
         const toAddSection = contentEl.createDiv({ cls: 'logseqer-sync-section' });
         const toAddHeader = toAddSection.createDiv({ cls: 'logseqer-sync-header' });
         toAddHeader.createSpan({
-            text: `To Add (${toAddItems.length})`,
+            text: this.tr('modal.toAddCount', { count: toAddItems.length }),
             cls: 'logseqer-sync-header'
         });
         const toAddHeaderCheckbox = toAddHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' });
@@ -1369,14 +1435,14 @@ class BookmarkSyncModal extends Modal {
         
         if (toAddItems.length === 0) {
             const emptyItem = toAddList.createDiv({ cls: 'logseqer-sync-item' });
-            emptyItem.createDiv({ text: 'No new pages to add', cls: 'logseqer-sync-item-label' });
+            emptyItem.createDiv({ text: this.tr('modal.noNewPagesToAdd'), cls: 'logseqer-sync-item-label' });
         }
         
         // Section 2: Existing pages
         const existingSection = contentEl.createDiv({ cls: 'logseqer-sync-section' });
         const existingHeader = existingSection.createDiv({ cls: 'logseqer-sync-header' });
         existingHeader.createSpan({
-            text: `Existing (${currentPages.length})`,
+            text: this.tr('modal.existingCount', { count: currentPages.length }),
             cls: 'logseqer-sync-header'
         });
         const existingHeaderCheckbox = existingHeader.createEl('input', { type: 'checkbox', cls: 'group-checkbox' });
@@ -1398,20 +1464,20 @@ class BookmarkSyncModal extends Modal {
         
         if (existingItems.length === 0) {
             const emptyItem = existingList.createDiv({ cls: 'logseqer-sync-item' });
-            emptyItem.createDiv({ text: 'No existing pages', cls: 'logseqer-sync-item-label' });
+            emptyItem.createDiv({ text: this.tr('modal.noExistingPages'), cls: 'logseqer-sync-item-label' });
         }
         
         // Action buttons
         const btnRow = contentEl.createDiv({ cls: 'modal-button-row' });
         const rightDiv = btnRow.createDiv({ cls: 'modal-button-right' });
         
-        const confirmBtn = rightDiv.createEl('button', { text: 'Confirm', cls: 'mod-cta' });
+        const confirmBtn = rightDiv.createEl('button', { text: this.tr('modal.confirm'), cls: 'mod-cta' });
         confirmBtn.onclick = async () => {
             await this.executeSync();
             this.close();
         };
         
-        const cancelBtn = rightDiv.createEl('button', { text: 'Cancel' });
+        const cancelBtn = rightDiv.createEl('button', { text: this.tr('modal.cancel') });
         cancelBtn.onclick = () => this.close();
         
         // Adjust footer button widths (same as VaultCheckResolutionModal)
@@ -1488,7 +1554,7 @@ class BookmarkSyncModal extends Modal {
                     
                     if (addedCount > 0) {
                         await adapter.write(this.bookmarkPath, JSON.stringify(bookmarkContent, null, 2));
-                        new Notice(`Added ${addedCount} bookmarks to Obsidian.`);
+                        this.notify('notice.addedBookmarksToObsidian', { count: addedCount });
                     }
                 }
             }
@@ -1521,13 +1587,13 @@ class BookmarkSyncModal extends Modal {
                     }
                     
                     await adapter.write(this.logseqConfigPath, configContent);
-                    new Notice(`Added ${pagesToAddToLogseq.length} favorites to Logseq.`);
+                    this.notify('notice.addedFavoritesToLogseq', { count: pagesToAddToLogseq.length });
                 }
             }
             
         } catch (e) {
             console.error("Logseqer: Error executing bookmark sync", e);
-            new Notice("Error executing bookmark sync. See console.");
+            this.notify('notice.errorExecutingBookmarkSync');
         }
     }
 
@@ -1542,6 +1608,8 @@ class SyncResolutionModal extends Modal {
     ambiguousPages: { name: string; files: (TFile | MockFile)[] }[];
     bookmarkPath: string;
     simulation: boolean;
+    tr: (key: string, vars?: Record<string, string | number>) => string;
+    notify: (key: string, vars?: Record<string, string | number>) => void;
 
     // State
     selectedMissing: Set<string>;
@@ -1561,6 +1629,8 @@ class SyncResolutionModal extends Modal {
         this.ambiguousPages = ambiguousPages;
         this.bookmarkPath = bookmarkPath;
         this.simulation = !!simulation;
+        this.tr = plugin.tr.bind(plugin);
+        this.notify = plugin.notify.bind(plugin);
 
         this.selectedMissing = new Set(missingPages);
         this.selectedAmbiguous = new Map();
@@ -1573,13 +1643,13 @@ class SyncResolutionModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h2', { text: 'Sync Logseq favorites' });
-        contentEl.createEl('p', { text: 'Review changes to your Obsidian bookmarks.', cls: 'logseqer-sync-desc' });
+        contentEl.createEl('h2', { text: this.tr('modal.syncLogseqFavorites') });
+        contentEl.createEl('p', { text: this.tr('modal.syncReviewChanges'), cls: 'logseqer-sync-desc' });
 
         // Section: Ambiguous (Duplicates)
         if (this.ambiguousPages.length > 0) {
             const section = contentEl.createDiv({ cls: 'logseqer-sync-section' });
-            section.createSpan({ text: 'Duplicate matches (please select)', cls: 'logseqer-sync-header' });
+            section.createSpan({ text: this.tr('modal.duplicateMatches'), cls: 'logseqer-sync-header' });
 
             const list = section.createDiv({ cls: 'logseqer-sync-list' });
 
@@ -1607,7 +1677,7 @@ class SyncResolutionModal extends Modal {
         // Section: Missing
         if (this.missingPages.length > 0) {
             const section = contentEl.createDiv({ cls: 'logseqer-sync-section' });
-            section.createSpan({ text: 'Missing pages (create & bookmark)', cls: 'logseqer-sync-header' });
+            section.createSpan({ text: this.tr('modal.missingPages'), cls: 'logseqer-sync-header' });
 
             const list = section.createDiv({ cls: 'logseqer-sync-list' });
 
@@ -1633,16 +1703,16 @@ class SyncResolutionModal extends Modal {
 
         // Action Buttons
         const btnDiv = contentEl.createDiv({ cls: 'modal-button-container' });
-        const saveBtn = btnDiv.createEl('button', { text: 'Sync selected', cls: 'mod-cta' });
+        const saveBtn = btnDiv.createEl('button', { text: this.tr('modal.syncSelected'), cls: 'mod-cta' });
         saveBtn.onclick = async () => await this.executeSync();
 
-        const cancelBtn = btnDiv.createEl('button', { text: 'Cancel' });
+        const cancelBtn = btnDiv.createEl('button', { text: this.tr('modal.cancel') });
         cancelBtn.onclick = () => this.close();
     }
 
     async executeSync() {
         if (this.simulation) {
-            new Notice('Simulation mode: no changes will be made.');
+            this.notify('notice.simulationMode');
             return;
         }
 
@@ -1690,12 +1760,12 @@ class SyncResolutionModal extends Modal {
 
             if (createdCount > 0 || addedCount > 0) {
                 await adapter.write(this.bookmarkPath, JSON.stringify(bookmarkContent, null, 2));
-                new Notice(`Synced: ${addedCount} ambiguous resolved, ${createdCount} created in default folder.`);
+                this.notify('notice.syncBookmarksDone', { ambiguous: addedCount, created: createdCount });
             }
 
         } catch (e) {
             console.error("Logseqer: Failed to sync bookmarks", e);
-            new Notice("Failed to sync bookmarks.");
+            this.notify('notice.syncBookmarksFailed');
         }
     }
 
@@ -1743,6 +1813,8 @@ class VaultCheckResolutionModal extends Modal {
     selectedIssues: Set<VaultCheckIssue>;
     simulation: boolean;
     components: Component[]; // Store components for cleanup
+    tr: (key: string, vars?: Record<string, string | number>) => string;
+    notify: (key: string, vars?: Record<string, string | number>) => void;
 
     constructor(app: App, plugin: LogseqerPlugin, issues: VaultCheckIssue[], simulation = false) {
         super(app);
@@ -1751,12 +1823,14 @@ class VaultCheckResolutionModal extends Modal {
         this.selectedIssues = new Set(issues.filter(i => i.fixData !== null));
         this.simulation = !!simulation;
         this.components = [];
+        this.tr = plugin.tr.bind(plugin);
+        this.notify = plugin.notify.bind(plugin);
     }
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl('h2', { text: 'Vault compatibility check' });
-        contentEl.createEl('p', { text: 'The following Logseq-to-Obsidian compatibility issues were found. Select the fixes you wish to apply.', cls: 'logseqer-sync-desc' });
+        contentEl.createEl('h2', { text: this.tr('modal.vaultCompatibility') });
+        contentEl.createEl('p', { text: this.tr('modal.vaultIssuesDesc'), cls: 'logseqer-sync-desc' });
 
             // (Select controls moved to modal footer)
 
@@ -1834,8 +1908,8 @@ class VaultCheckResolutionModal extends Modal {
         const leftDiv = btnRow.createDiv({ cls: 'modal-button-left' });
         const rightDiv = btnRow.createDiv({ cls: 'modal-button-right' });
 
-        const selectAllBtn = leftDiv.createEl('button', { text: 'Select all' });
-        const deselectAllBtn = leftDiv.createEl('button', { text: 'Deselect all' });
+        const selectAllBtn = leftDiv.createEl('button', { text: this.tr('modal.selectAll') });
+        const deselectAllBtn = leftDiv.createEl('button', { text: this.tr('modal.deselectAll') });
         selectAllBtn.onclick = () => {
             this.issues.forEach(i => { if (i.fixData) this.selectedIssues.add(i); });
             this.contentEl.empty();
@@ -1847,21 +1921,21 @@ class VaultCheckResolutionModal extends Modal {
             this.onOpen();
         };
 
-        const fixBtn = rightDiv.createEl('button', { text: 'Apply', cls: 'mod-cta' });
+        const fixBtn = rightDiv.createEl('button', { text: this.tr('modal.apply'), cls: 'mod-cta' });
         fixBtn.onclick = () => {
             if (this.simulation) {
-                new Notice('Simulation mode: no changes will be made.');
+                this.notify('notice.simulationMode');
                 return;
             }
-            new CustomConfirmationModal(this.app, 'Apply selected fixes? This will modify files in your vault.', () => {
+            new CustomConfirmationModal(this.app, this.plugin.tr('confirm.applyFixes'), () => {
                 void (async () => {
                     await this.applyFixes();
                     this.close();
                 })();
-            }).open();
+            }, this.plugin).open();
         };
 
-        const cancelBtn = rightDiv.createEl('button', { text: 'Close' });
+        const cancelBtn = rightDiv.createEl('button', { text: this.tr('modal.close') });
         cancelBtn.onclick = () => this.close();
 
         // Adjust footer button widths and wrapping to match available space
@@ -2006,7 +2080,7 @@ class VaultCheckResolutionModal extends Modal {
             }
         }
 
-        new Notice(`Applied ${renameCount} renames and ${contentCount} content fixes.`);
+        this.notify('notice.appliedFixes', { rename: renameCount, content: contentCount });
     }
 
     onClose() {

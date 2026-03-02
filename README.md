@@ -1,5 +1,7 @@
 # Obsidian Logseqer Plugin
 
+English | [简体中文](README_zh-CN.md)
+
 An Obsidian plugin designed to provide a Logseq-native experience and enhance workflow compatibility between both applications.
 
 ## Main Features
