@@ -60,6 +60,7 @@ interface LogseqerSettings {
     developerMode?: boolean;
     enableVaultCommand?: boolean;
     enableSyncCommand?: boolean;
+    enableDeleteEmptyJournalsCommand?: boolean;
     enableVaultDateCheck?: boolean;
     enableVaultNamespaceCheck?: boolean;
     enableVaultTaskMarkerCheck?: boolean;
@@ -77,6 +78,7 @@ const DEFAULT_SETTINGS: LogseqerSettings = {
     developerMode: false,
     enableVaultCommand: true,
     enableSyncCommand: true,
+    enableDeleteEmptyJournalsCommand: true,
     enableVaultDateCheck: true,
     enableVaultNamespaceCheck: true,
     enableVaultTaskMarkerCheck: true,
@@ -155,7 +157,18 @@ export default class LogseqerPlugin extends Plugin {
             });
         }
 
-        // 4. Feature: Journal
+        // 4. Feature: Delete Empty Journals Command
+        if (this.settings.enableDeleteEmptyJournalsCommand) {
+            this.addCommand({
+                id: 'delete-empty-journals',
+                name: this.tr('command.deleteEmptyJournals'),
+                callback: () => {
+                    void this.deleteEmptyJournals();
+                }
+            });
+        }
+
+        // 5. Feature: Journal
         // New Journal automatically add "- "
         this.registerEvent(
             this.app.vault.on('create', async (file) => {
@@ -753,7 +766,35 @@ export default class LogseqerPlugin extends Plugin {
         }
     }
 
-    // 4. Feature: Backlinks Customization
+    // 5. Feature: Delete Empty Journals
+    async deleteEmptyJournals() {
+        const journalFolder = this.getDailyNoteFolder();
+        const files = this.app.vault.getMarkdownFiles();
+        const emptyFiles: TFile[] = [];
+
+        for (const file of files) {
+            if (file.path.startsWith(journalFolder + '/')) {
+                try {
+                    const content = await this.app.vault.read(file);
+                    // Check if file contains only "- " (possibly with whitespace)
+                    const trimmed = content.trim();
+                    if (trimmed === '-' || trimmed === '- ') {
+                        emptyFiles.push(file);
+                    }
+                } catch (e) {
+                    console.warn('Logseqer: failed reading file for empty check', file.path, e);
+                }
+            }
+        }
+
+        if (emptyFiles.length > 0) {
+            new DeleteEmptyJournalsModal(this.app, this, emptyFiles).open();
+        } else {
+            this.notify('notice.noEmptyJournals');
+        }
+    }
+
+    // 6. Feature: Backlinks Customization
     // Custom "journals/*" backlinks default query (now uses dynamic folder)
     updateBacklinkQuery(leaf?: WorkspaceLeaf | null) {
         if (!this.settings.enableBacklinkQuery) return;
@@ -882,6 +923,139 @@ class CustomConfirmationModal extends Modal {
 
         const cancelBtn = btnDiv.createEl('button', { text: this.plugin?.tr('modal.cancel') ?? 'Cancel' });
         cancelBtn.onclick = () => this.close();
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
+// Delete Empty Journals Modal
+class DeleteEmptyJournalsModal extends Modal {
+    plugin: LogseqerPlugin;
+    emptyFiles: TFile[];
+    selectedFiles: Set<TFile>;
+    tr: (key: string, vars?: Record<string, string | number>) => string;
+    notify: (key: string, vars?: Record<string, string | number>) => void;
+
+    constructor(app: App, plugin: LogseqerPlugin, emptyFiles: TFile[]) {
+        super(app);
+        this.plugin = plugin;
+        this.emptyFiles = emptyFiles;
+        this.selectedFiles = new Set(emptyFiles);
+        this.tr = plugin.tr.bind(plugin);
+        this.notify = plugin.notify.bind(plugin);
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: this.tr('command.deleteEmptyJournals') });
+        
+        const descText = this.tr('confirm.deleteEmptyJournals', { count: this.emptyFiles.length });
+        contentEl.createEl('p', { text: descText, cls: 'logseqer-sync-desc' });
+
+        const section = contentEl.createDiv({ cls: 'logseqer-sync-section' });
+        const header = section.createDiv({ cls: 'logseqer-sync-header' });
+        header.createSpan({ text: `${this.emptyFiles.length} files`, cls: 'logseqer-sync-header' });
+
+        const headerControls = header.createDiv({ cls: 'header-controls' });
+        const selectAllBtn = headerControls.createEl('button', { text: this.tr('modal.selectAll') });
+        const deselectAllBtn = headerControls.createEl('button', { text: this.tr('modal.deselectAll') });
+        
+        selectAllBtn.onclick = () => {
+            this.emptyFiles.forEach(f => this.selectedFiles.add(f));
+            this.contentEl.empty();
+            this.onOpen();
+        };
+        deselectAllBtn.onclick = () => {
+            this.selectedFiles.clear();
+            this.contentEl.empty();
+            this.onOpen();
+        };
+
+        const list = section.createDiv({ cls: 'logseqer-sync-list' });
+
+        this.emptyFiles.forEach(file => {
+            const item = list.createDiv({ cls: 'logseqer-sync-item' });
+            
+            const labelDiv = item.createDiv({ cls: 'logseqer-sync-item-label' });
+            
+            const pathDiv = labelDiv.createDiv({ cls: 'logseqer-issue-path' });
+            const hrefPath = file.path.replace(/\.md$/, '');
+            const link = pathDiv.createEl('a', {
+                cls: 'internal-link',
+                text: file.path,
+                href: hrefPath
+            });
+            link.setAttribute('data-href', hrefPath);
+            link.setAttribute('href', hrefPath);
+            link.onclick = (e) => {
+                e.preventDefault();
+                void this.app.workspace.openLinkText(hrefPath, '', true);
+            };
+
+            const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
+            const checkbox = controlDiv.createEl('input', { type: 'checkbox' });
+            checkbox.checked = this.selectedFiles.has(file);
+            checkbox.onchange = (e) => {
+                if ((e.target as HTMLInputElement).checked) {
+                    this.selectedFiles.add(file);
+                } else {
+                    this.selectedFiles.delete(file);
+                }
+            };
+        });
+
+        const btnRow = contentEl.createDiv({ cls: 'modal-button-row' });
+        const leftDiv = btnRow.createDiv({ cls: 'modal-button-left' });
+        const rightDiv = btnRow.createDiv({ cls: 'modal-button-right' });
+
+        const confirmBtn = rightDiv.createEl('button', { text: this.tr('modal.confirm'), cls: 'mod-cta' });
+        confirmBtn.onclick = async () => {
+            try {
+                for (const file of this.selectedFiles) {
+                    await this.app.vault.delete(file);
+                }
+                this.notify('notice.deletedEmptyJournals', { count: this.selectedFiles.size });
+                this.close();
+            } catch (e) {
+                console.error('Logseqer: Error deleting empty journals', e);
+            }
+        };
+
+        const cancelBtn = rightDiv.createEl('button', { text: this.tr('modal.cancel') });
+        cancelBtn.onclick = () => this.close();
+
+        const adjustFooterLayout = () => {
+            const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button'));
+            allBtns.forEach(b => { setElementStyles(b, { width: '', display: '' }); });
+            const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
+            let maxW = 0;
+            allBtns.forEach(b => { maxW = Math.max(maxW, b.getBoundingClientRect().width); });
+            const gap = 8;
+            const totalNeeded = maxW * allBtns.length + gap * (allBtns.length - 1);
+            if (totalNeeded <= contentW) {
+                allBtns.forEach(b => setElementStyles(b, { width: `${Math.ceil(maxW)}px` }));
+                setElementStyles(leftDiv, { flexBasis: '' });
+                setElementStyles(rightDiv, { flexBasis: '' });
+            } else {
+                setElementStyles(leftDiv, { flexBasis: '100%' });
+                setElementStyles(rightDiv, { flexBasis: '100%' });
+                const rightBtns = Array.from(rightDiv.querySelectorAll('button'));
+                if (rightBtns.length > 0) {
+                    let m = 0;
+                    rightBtns.forEach(b => m = Math.max(m, b.getBoundingClientRect().width));
+                    rightBtns.forEach(b => setElementStyles(b, { width: `${Math.ceil(m)}px` }));
+                }
+                const widest = Math.max(...allBtns.map(b => b.getBoundingClientRect().width));
+                if (widest > contentW) {
+                    allBtns.forEach(b => { setElementStyles(b, { width: '100%', display: 'block' }); });
+                }
+            }
+        };
+
+        setTimeout(() => adjustFooterLayout(), 30);
+        window.addEventListener('resize', adjustFooterLayout);
     }
 
     onClose() {
@@ -1076,12 +1250,22 @@ class LogseqerSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        new Setting(containerEl)
+            .setName(this.plugin.tr('settings.deleteEmptyJournalsCommand'))
+            .setDesc(this.plugin.tr('settings.deleteEmptyJournalsCommandDesc'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableDeleteEmptyJournalsCommand ?? true)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableDeleteEmptyJournalsCommand = value;
+                    await this.plugin.saveSettings();
+                }));
+
         new Setting(containerEl).setName(this.plugin.tr('settings.vaultCheckHeading')).setHeading();
 
         // Parent: Vault Check command with collapsible subfeatures
         new Setting(containerEl)
-            .setName(this.plugin.tr('settings.vaultCheck'))
-            .setDesc(this.plugin.tr('settings.vaultCheckDesc'))
+            .setName(this.plugin.tr('settings.vaultCheckCommand'))
+            .setDesc(this.plugin.tr('settings.vaultCheckCommandDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableVaultCommand ?? true)
                 .onChange(async (value) => {
@@ -1147,8 +1331,8 @@ class LogseqerSettingTab extends PluginSettingTab {
 
         // Sync command toggle
         new Setting(containerEl)
-            .setName(this.plugin.tr('settings.syncSettings'))
-            .setDesc(this.plugin.tr('settings.syncSettingsDesc'))
+            .setName(this.plugin.tr('settings.syncSettingsCommand'))
+            .setDesc(this.plugin.tr('settings.syncSettingsCommandDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableSyncCommand ?? true)
                 .onChange(async (value) => {

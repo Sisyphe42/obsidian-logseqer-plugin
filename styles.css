@@ -74,6 +74,12 @@
     margin-left: 8px;
 }
 
+.header-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 .logseqer-sync-item-control select {
     width: 200px;
     max-width: 100%;
