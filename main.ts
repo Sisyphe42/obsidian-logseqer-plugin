@@ -200,7 +200,7 @@ export default class LogseqerPlugin extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<LogseqerSettings>);
         this.locale = resolveLocale(this.settings.locale || 'auto', getLanguage());
     }
 
@@ -326,7 +326,7 @@ export default class LogseqerPlugin extends Plugin {
                     if (await adapter.exists(dailyPath)) {
                         const txt = await adapter.read(dailyPath);
                         try {
-                            const j = JSON.parse(txt);
+                            const j = JSON.parse(txt) as Record<string, string>;
                             obsDailyFormat = obsDailyFormat || j.format || null;
                             obsDailyFolder = obsDailyFolder || j.folder || null;
                         } catch {
@@ -342,7 +342,7 @@ export default class LogseqerPlugin extends Plugin {
                 if (await adapter.exists(appPath)) {
                     try {
                         const txt = await adapter.read(appPath);
-                        const j = JSON.parse(txt);
+                        const j = JSON.parse(txt) as Record<string, string>;
                         appNewFileLocation = j.newFileLocation || null;
                         appNewFileFolderPath = j.newFileFolderPath || null;
                     } catch {
@@ -823,7 +823,7 @@ export default class LogseqerPlugin extends Plugin {
 
                 if (!searchInputContainer) {
                     if (attempt < maxRetries) {
-                        setTimeout(() => tryInject(attempt + 1), retryInterval);
+                        window.setTimeout(() => tryInject(attempt + 1), retryInterval);
                     }
                     return;
                 }
@@ -838,7 +838,7 @@ export default class LogseqerPlugin extends Plugin {
                 const inputEl = searchInputContainer.querySelector("input");
                 if (!inputEl) {
                     if (attempt < maxRetries) {
-                        setTimeout(() => tryInject(attempt + 1), retryInterval);
+                        window.setTimeout(() => tryInject(attempt + 1), retryInterval);
                     }
                     return;
                 }
@@ -943,8 +943,8 @@ class DeleteEmptyJournalsModal extends Modal {
         this.plugin = plugin;
         this.emptyFiles = emptyFiles;
         this.selectedFiles = new Set(emptyFiles);
-        this.tr = plugin.tr.bind(plugin);
-        this.notify = plugin.notify.bind(plugin);
+        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
+        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
     }
 
     onOpen() {
@@ -1014,7 +1014,7 @@ class DeleteEmptyJournalsModal extends Modal {
         confirmBtn.onclick = async () => {
             try {
                 for (const file of this.selectedFiles) {
-                    await this.app.vault.delete(file);
+                    await this.app.fileManager.trashFile(file);
                 }
                 this.notify('notice.deletedEmptyJournals', { count: this.selectedFiles.size });
                 this.close();
@@ -1029,7 +1029,7 @@ class DeleteEmptyJournalsModal extends Modal {
         const adjustFooterLayout = () => {
             const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button'));
             allBtns.forEach(b => { setElementStyles(b, { width: '', display: '' }); });
-            const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
+            const contentW = contentEl.clientWidth || (activeDocument.body.clientWidth - 200);
             let maxW = 0;
             allBtns.forEach(b => { maxW = Math.max(maxW, b.getBoundingClientRect().width); });
             const gap = 8;
@@ -1054,7 +1054,7 @@ class DeleteEmptyJournalsModal extends Modal {
             }
         };
 
-        setTimeout(() => adjustFooterLayout(), 30);
+        window.setTimeout(() => adjustFooterLayout(), 30);
         window.addEventListener('resize', adjustFooterLayout);
     }
 
@@ -1146,7 +1146,7 @@ class FolderSuggest {
         this.inputEl.addEventListener('input', () => this.onInput());
         this.inputEl.addEventListener('focus', () => this.onInput());
         this.inputEl.addEventListener('blur', () => {
-            setTimeout(() => this.hideSuggestions(), 200);
+            window.setTimeout(() => this.hideSuggestions(), 200);
         });
     }
 
@@ -1173,7 +1173,7 @@ class FolderSuggest {
                 top: `${rect.bottom}px`,
                 width: `${rect.width}px`
             });
-            document.body.appendChild(this.suggestEl);
+            activeDocument.body.appendChild(this.suggestEl);
         }
 
         this.suggestEl.empty();
@@ -1483,8 +1483,8 @@ class BookmarkSyncModal extends Modal {
         this.canModifyObsidian = canModifyObsidian;
         this.canModifyLogseq = canModifyLogseq;
         this.direction = direction;
-        this.tr = plugin.tr.bind(plugin);
-        this.notify = plugin.notify.bind(plugin);
+        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
+        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
         
         // Default view based on direction
         this.currentView = direction === 'logseq-to-obsidian' ? 'logseq' : 'obsidian';
@@ -1668,7 +1668,7 @@ class BookmarkSyncModal extends Modal {
         const adjustFooterLayout = () => {
             const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button'));
             allBtns.forEach(b => { setElementStyles(b, { width: '', display: '' }); });
-            const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
+            const contentW = contentEl.clientWidth || (activeDocument.body.clientWidth - 200);
             let maxW = 0;
             allBtns.forEach(b => { maxW = Math.max(maxW, b.getBoundingClientRect().width); });
             const gap = 8;
@@ -1691,7 +1691,7 @@ class BookmarkSyncModal extends Modal {
             }
         };
         
-        setTimeout(() => adjustFooterLayout(), 30);
+        window.setTimeout(() => adjustFooterLayout(), 30);
         window.addEventListener('resize', adjustFooterLayout);
     }
 
@@ -1813,8 +1813,8 @@ class SyncResolutionModal extends Modal {
         this.ambiguousPages = ambiguousPages;
         this.bookmarkPath = bookmarkPath;
         this.simulation = !!simulation;
-        this.tr = plugin.tr.bind(plugin);
-        this.notify = plugin.notify.bind(plugin);
+        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
+        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
 
         this.selectedMissing = new Set(missingPages);
         this.selectedAmbiguous = new Map();
@@ -1907,7 +1907,7 @@ class SyncResolutionModal extends Modal {
 
         try {
             // Read latest
-            const bookmarkContent = JSON.parse(await adapter.read(this.bookmarkPath));
+            const bookmarkContent = JSON.parse(await adapter.read(this.bookmarkPath)) as {items: BookmarkItem[]};
 
             // 1. Ambiguous
             this.selectedAmbiguous.forEach((_name, path) => {
@@ -2007,8 +2007,8 @@ class VaultCheckResolutionModal extends Modal {
         this.selectedIssues = new Set(issues.filter(i => i.fixData !== null));
         this.simulation = !!simulation;
         this.components = [];
-        this.tr = plugin.tr.bind(plugin);
-        this.notify = plugin.notify.bind(plugin);
+        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
+        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
     }
 
     onOpen() {
@@ -2127,7 +2127,7 @@ class VaultCheckResolutionModal extends Modal {
             const allBtns: HTMLButtonElement[] = Array.from(btnRow.querySelectorAll('button'));
             // Reset styles
             allBtns.forEach(b => { setElementStyles(b, { width: '', display: '' }); });
-            const contentW = contentEl.clientWidth || (document.body.clientWidth - 200);
+            const contentW = contentEl.clientWidth || (activeDocument.body.clientWidth - 200);
             // measure widest
             let maxW = 0;
             allBtns.forEach(b => { maxW = Math.max(maxW, b.getBoundingClientRect().width); });
@@ -2160,7 +2160,7 @@ class VaultCheckResolutionModal extends Modal {
             }
         };
 
-        setTimeout(() => adjustFooterLayout(), 30);
+        window.setTimeout(() => adjustFooterLayout(), 30);
         window.addEventListener('resize', adjustFooterLayout);
     }
 

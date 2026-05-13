@@ -18,13 +18,16 @@
 
 /* Sync Resolution Modal Styling */
 .logseqer-sync-section {
+    margin-top: 12px;
     margin-bottom: 24px;
 }
 
 .logseqer-sync-header {
     font-weight: bold;
     margin-bottom: 8px;
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     color: var(--text-muted);
     text-transform: uppercase;
     font-size: 0.8em;
@@ -58,16 +61,6 @@
     overflow: visible;
     white-space: normal;
     word-break: break-word;
-}
-
-.logseqer-sync-section {
-    margin-top: 12px;
-}
-
-.logseqer-sync-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
 }
 
 .group-checkbox {
