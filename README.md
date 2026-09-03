@@ -27,6 +27,18 @@ Syncs Logseq favorites to Obsidian bookmarks. Handles duplicates and creates mis
 - Auto-formats new journal files
 - Customizable default backlinks query
 
+### 5. Selection Formatting
+
+Transform selected text from the command palette or editor context menu:
+
+- Convert lines to an unordered list without duplicating existing markers
+- Convert hard line breaks to soft line breaks
+- Convert soft line breaks to standard two-space hard line breaks
+
+List conversion preserves code fences, tables, HTML blocks, blank lines, and existing bullet markers. Line-break conversion only changes plain-paragraph breaks. The feature has one master switch, and each action can appear as a command, a context-menu item, or both. Commands can be assigned custom hotkeys in Obsidian.
+
+> With **Strict line breaks** disabled, soft and hard breaks may look identical in rendered views. The source still differs by two trailing spaces.
+
 ### TODO
 
 1. Page preview
@@ -43,12 +55,14 @@ Syncs Logseq favorites to Obsidian bookmarks. Handles duplicates and creates mis
 
 ```bash
 npm install
+npm test
 npm run build
 ```
 
 ## Settings
 
 - **Toggle Features**: Enable/disable each feature independently
+- **Selection Formatting**: Choose command, context menu, or both for each action
 - **Folder Configuration**: Logseq and Obsidian folders (autocomplete available)
 - **Backlink Query**: Customize journal backlinks filter
 - **Restore Defaults**: Reset all settings to defaults
