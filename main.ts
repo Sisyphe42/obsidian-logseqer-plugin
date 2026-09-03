@@ -1,5 +1,6 @@
-import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component, getLanguage } from 'obsidian';
+import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component, Editor, getLanguage } from 'obsidian';
 import { checkLogseqSyntaxDOM } from './logseqSyntax';
+import { addListMarkers, hardBreaksToSoft, softBreaksToHard } from './textTransforms';
 import zhCN from './i18n/zh-CN';
 import en from './i18n/en';
 
@@ -54,6 +55,7 @@ interface LogseqerSettings {
     locale?: LocaleSetting;
     enableSyntaxCheck: boolean;
     enableJournalNew: boolean;
+    enableSelectionContextMenu: boolean;
     enableBacklinkQuery: boolean;
     backlinkQueryString: string;
     logseqFolder: string; // Folder containing Logseq files
@@ -72,6 +74,7 @@ const DEFAULT_SETTINGS: LogseqerSettings = {
     locale: 'auto',
     enableSyntaxCheck: true,
     enableJournalNew: true,
+    enableSelectionContextMenu: true,
     enableBacklinkQuery: true,
     backlinkQueryString: '-path:"journals/Journaling"',
     logseqFolder: 'logseq',
@@ -132,6 +135,34 @@ export default class LogseqerPlugin extends Plugin {
         this.registerEvent(
             this.app.workspace.on('editor-change', (_editor, _info) => {
                 void this.updateSyntaxCheck();
+            })
+        );
+
+        // Add Logseq-oriented text transforms to the editor context menu.
+        this.registerEvent(
+            this.app.workspace.on('editor-menu', (menu, editor) => {
+                if (!this.settings.enableSelectionContextMenu || !editor.somethingSelected()) return;
+
+                const selectedText = editor.getSelection();
+                if (selectedText.length === 0) return;
+
+                menu.addItem(item => item
+                    .setSection('logseqer-selection')
+                    .setIcon('list-plus')
+                    .setTitle(this.tr('menu.addListMarkers'))
+                    .onClick(() => this.replaceSelectedText(editor, addListMarkers)));
+
+                menu.addItem(item => item
+                    .setSection('logseqer-selection')
+                    .setIcon('remove-formatting')
+                    .setTitle(this.tr('menu.hardBreaksToSoft'))
+                    .onClick(() => this.replaceSelectedText(editor, hardBreaksToSoft)));
+
+                menu.addItem(item => item
+                    .setSection('logseqer-selection')
+                    .setIcon('wrap-text')
+                    .setTitle(this.tr('menu.softBreaksToHard'))
+                    .onClick(() => this.replaceSelectedText(editor, softBreaksToHard)));
             })
         );
 
@@ -206,6 +237,12 @@ export default class LogseqerPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
+    }
+
+    private replaceSelectedText(editor: Editor, transform: (text: string) => string): void {
+        const selectedText = editor.getSelection();
+        if (selectedText.length === 0) return;
+        editor.replaceSelection(transform(selectedText), 'logseqer-selection-transform');
     }
 
     // Helper: Get Daily Notes Folder from Internal Plugin
@@ -1247,6 +1284,16 @@ class LogseqerSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.enableJournalNew)
                 .onChange(async (value) => {
                     this.plugin.settings.enableJournalNew = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(this.plugin.tr('settings.selectionContextMenu'))
+            .setDesc(this.plugin.tr('settings.selectionContextMenuDesc'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableSelectionContextMenu ?? true)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableSelectionContextMenu = value;
                     await this.plugin.saveSettings();
                 }));
 
