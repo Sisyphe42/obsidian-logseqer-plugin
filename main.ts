@@ -1,11 +1,14 @@
 import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component, Editor, getLanguage } from 'obsidian';
 import { checkLogseqSyntaxDOM } from './logseqSyntax';
-import { addListMarkers, hardBreaksToSoft, softBreaksToHard } from './textTransforms';
+import { applySelectionAction, isSelectionActionAvailable } from './selectionActions';
 import zhCN from './i18n/zh-CN';
 import en from './i18n/en';
 
 type SupportedLocale = 'zh-CN' | 'en';
 type LocaleSetting = 'auto' | SupportedLocale;
+type SelectionActionId = 'add-list-markers' | 'hard-breaks-to-soft' | 'soft-breaks-to-hard';
+type SelectionActionMode = 'command' | 'context-menu' | 'both';
+type SelectionActionSurface = 'command' | 'context-menu';
 
 const I18N: Record<SupportedLocale, Record<string, string>> = {
     'zh-CN': zhCN,
@@ -55,7 +58,11 @@ interface LogseqerSettings {
     locale?: LocaleSetting;
     enableSyntaxCheck: boolean;
     enableJournalNew: boolean;
-    enableSelectionContextMenu: boolean;
+    enableSelectionActions: boolean;
+    selectionListMode: SelectionActionMode;
+    selectionHardToSoftMode: SelectionActionMode;
+    selectionSoftToHardMode: SelectionActionMode;
+    enableSelectionContextMenu?: boolean;
     enableBacklinkQuery: boolean;
     backlinkQueryString: string;
     logseqFolder: string; // Folder containing Logseq files
@@ -74,7 +81,10 @@ const DEFAULT_SETTINGS: LogseqerSettings = {
     locale: 'auto',
     enableSyntaxCheck: true,
     enableJournalNew: true,
-    enableSelectionContextMenu: true,
+    enableSelectionActions: true,
+    selectionListMode: 'both',
+    selectionHardToSoftMode: 'both',
+    selectionSoftToHardMode: 'both',
     enableBacklinkQuery: true,
     backlinkQueryString: '-path:"journals/Journaling"',
     logseqFolder: 'logseq',
@@ -138,31 +148,21 @@ export default class LogseqerPlugin extends Plugin {
             })
         );
 
-        // Add Logseq-oriented text transforms to the editor context menu.
+        this.registerSelectionCommands();
+
+        // Add enabled text transforms to the editor context menu.
         this.registerEvent(
             this.app.workspace.on('editor-menu', (menu, editor) => {
-                if (!this.settings.enableSelectionContextMenu || !editor.somethingSelected()) return;
+                if (!editor.somethingSelected()) return;
 
-                const selectedText = editor.getSelection();
-                if (selectedText.length === 0) return;
-
-                menu.addItem(item => item
-                    .setSection('logseqer-selection')
-                    .setIcon('list-plus')
-                    .setTitle(this.tr('menu.addListMarkers'))
-                    .onClick(() => this.replaceSelectedText(editor, addListMarkers)));
-
-                menu.addItem(item => item
-                    .setSection('logseqer-selection')
-                    .setIcon('remove-formatting')
-                    .setTitle(this.tr('menu.hardBreaksToSoft'))
-                    .onClick(() => this.replaceSelectedText(editor, hardBreaksToSoft)));
-
-                menu.addItem(item => item
-                    .setSection('logseqer-selection')
-                    .setIcon('wrap-text')
-                    .setTitle(this.tr('menu.softBreaksToHard'))
-                    .onClick(() => this.replaceSelectedText(editor, softBreaksToHard)));
+                for (const action of this.getSelectionActions()) {
+                    if (!this.isSelectionActionAvailable(action.id, 'context-menu')) continue;
+                    menu.addItem(item => item
+                        .setSection('logseqer-selection')
+                        .setIcon(action.icon)
+                        .setTitle(this.tr(action.labelKey))
+                        .onClick(() => this.runSelectionAction(editor, action.id)));
+                }
             })
         );
 
@@ -231,7 +231,12 @@ export default class LogseqerPlugin extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<LogseqerSettings>);
+        const loaded = await this.loadData() as Partial<LogseqerSettings>;
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+        if (loaded.enableSelectionActions === undefined && loaded.enableSelectionContextMenu !== undefined) {
+            this.settings.enableSelectionActions = loaded.enableSelectionContextMenu;
+        }
+        delete this.settings.enableSelectionContextMenu;
         this.locale = resolveLocale(this.settings.locale || 'auto', getLanguage());
     }
 
@@ -239,10 +244,45 @@ export default class LogseqerPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
-    private replaceSelectedText(editor: Editor, transform: (text: string) => string): void {
-        const selectedText = editor.getSelection();
-        if (selectedText.length === 0) return;
-        editor.replaceSelection(transform(selectedText), 'logseqer-selection-transform');
+    private getSelectionActions(): Array<{ id: SelectionActionId; mode: SelectionActionMode; labelKey: string; noticeKey: string; icon: string }> {
+        return [
+            { id: 'add-list-markers', mode: this.settings.selectionListMode, labelKey: 'menu.addListMarkers', noticeKey: 'notice.addListMarkersApplied', icon: 'list-plus' },
+            { id: 'hard-breaks-to-soft', mode: this.settings.selectionHardToSoftMode, labelKey: 'menu.hardBreaksToSoft', noticeKey: 'notice.hardBreaksToSoftApplied', icon: 'remove-formatting' },
+            { id: 'soft-breaks-to-hard', mode: this.settings.selectionSoftToHardMode, labelKey: 'menu.softBreaksToHard', noticeKey: 'notice.softBreaksToHardApplied', icon: 'wrap-text' },
+        ];
+    }
+
+    private isSelectionActionAvailable(actionId: SelectionActionId, surface: SelectionActionSurface): boolean {
+        const action = this.getSelectionActions().find(item => item.id === actionId);
+        return action !== undefined
+            && isSelectionActionAvailable(this.settings.enableSelectionActions, action.mode, surface);
+    }
+
+    private registerSelectionCommands(): void {
+        for (const action of this.getSelectionActions()) {
+            this.addCommand({
+                id: `selection-${action.id}`,
+                name: this.tr(action.labelKey),
+                icon: action.icon,
+                editorCheckCallback: (checking, editor) => {
+                    if (!this.isSelectionActionAvailable(action.id, 'command') || !editor.somethingSelected()) return false;
+                    if (!checking) this.runSelectionAction(editor, action.id);
+                    return true;
+                },
+            });
+        }
+    }
+
+    private runSelectionAction(editor: Editor, actionId: SelectionActionId): void {
+        const action = this.getSelectionActions().find(item => item.id === actionId);
+        if (action === undefined) return;
+
+        const result = applySelectionAction(editor, actionId);
+        if (result.changes === 0) {
+            this.notify('notice.selectionActionNoChanges');
+            return;
+        }
+        this.notify(action.noticeKey, { count: result.changes });
     }
 
     // Helper: Get Daily Notes Folder from Internal Plugin
@@ -1241,6 +1281,20 @@ class LogseqerSettingTab extends PluginSettingTab {
         this.plugin = plugin;
     }
 
+    private addSelectionActionModeSetting(containerEl: HTMLElement, labelKey: string, settingKey: 'selectionListMode' | 'selectionHardToSoftMode' | 'selectionSoftToHardMode'): void {
+        new Setting(containerEl)
+            .setName(this.plugin.tr(labelKey))
+            .addDropdown(dropdown => dropdown
+                .addOption('command', this.plugin.tr('settings.actionMode.command'))
+                .addOption('context-menu', this.plugin.tr('settings.actionMode.contextMenu'))
+                .addOption('both', this.plugin.tr('settings.actionMode.both'))
+                .setValue(this.plugin.settings[settingKey])
+                .onChange(async (value: SelectionActionMode) => {
+                    this.plugin.settings[settingKey] = value;
+                    await this.plugin.saveSettings();
+                }));
+    }
+
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
@@ -1288,14 +1342,21 @@ class LogseqerSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName(this.plugin.tr('settings.selectionContextMenu'))
-            .setDesc(this.plugin.tr('settings.selectionContextMenuDesc'))
+            .setName(this.plugin.tr('settings.selectionActions'))
+            .setDesc(this.plugin.tr('settings.selectionActionsDesc'))
             .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.enableSelectionContextMenu ?? true)
+                .setValue(this.plugin.settings.enableSelectionActions)
                 .onChange(async (value) => {
-                    this.plugin.settings.enableSelectionContextMenu = value;
+                    this.plugin.settings.enableSelectionActions = value;
                     await this.plugin.saveSettings();
+                    this.display();
                 }));
+
+        if (this.plugin.settings.enableSelectionActions) {
+            this.addSelectionActionModeSetting(containerEl, 'menu.addListMarkers', 'selectionListMode');
+            this.addSelectionActionModeSetting(containerEl, 'menu.hardBreaksToSoft', 'selectionHardToSoftMode');
+            this.addSelectionActionModeSetting(containerEl, 'menu.softBreaksToHard', 'selectionSoftToHardMode');
+        }
 
         new Setting(containerEl)
             .setName(this.plugin.tr('settings.deleteEmptyJournalsCommand'))
