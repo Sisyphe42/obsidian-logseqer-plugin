@@ -81,6 +81,7 @@ const en: Record<string, string> = {
     'settings.actionMode.command': 'Command only',
     'settings.actionMode.contextMenu': 'Context menu only',
     'settings.actionMode.both': 'Command and context menu',
+    'settings.actionMode.off': 'Off',
     'settings.deleteEmptyJournalsCommand': 'Command: Delete empty journals',
     'settings.deleteEmptyJournalsCommandDesc': 'Show the "Delete empty journals" command in the command palette.',
     'settings.vaultCheckHeading': 'Vault check',

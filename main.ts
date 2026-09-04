@@ -7,7 +7,7 @@ import en from './i18n/en';
 type SupportedLocale = 'zh-CN' | 'en';
 type LocaleSetting = 'auto' | SupportedLocale;
 type SelectionActionId = 'add-list-markers' | 'hard-breaks-to-soft' | 'soft-breaks-to-hard';
-type SelectionActionMode = 'command' | 'context-menu' | 'both';
+type SelectionActionMode = 'off' | 'command' | 'context-menu' | 'both';
 type SelectionActionSurface = 'command' | 'context-menu';
 
 const I18N: Record<SupportedLocale, Record<string, string>> = {
@@ -1285,6 +1285,7 @@ class LogseqerSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName(this.plugin.tr(labelKey))
             .addDropdown(dropdown => dropdown
+                .addOption('off', this.plugin.tr('settings.actionMode.off'))
                 .addOption('command', this.plugin.tr('settings.actionMode.command'))
                 .addOption('context-menu', this.plugin.tr('settings.actionMode.contextMenu'))
                 .addOption('both', this.plugin.tr('settings.actionMode.both'))
@@ -1341,7 +1342,7 @@ class LogseqerSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        new Setting(containerEl)
+        const selectionActionsSetting = new Setting(containerEl)
             .setName(this.plugin.tr('settings.selectionActions'))
             .setDesc(this.plugin.tr('settings.selectionActionsDesc'))
             .addToggle(toggle => toggle
@@ -1351,11 +1352,13 @@ class LogseqerSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                     this.display();
                 }));
+        selectionActionsSetting.settingEl.addClass('logseqer-selection-actions-master');
 
         if (this.plugin.settings.enableSelectionActions) {
-            this.addSelectionActionModeSetting(containerEl, 'menu.addListMarkers', 'selectionListMode');
-            this.addSelectionActionModeSetting(containerEl, 'menu.hardBreaksToSoft', 'selectionHardToSoftMode');
-            this.addSelectionActionModeSetting(containerEl, 'menu.softBreaksToHard', 'selectionSoftToHardMode');
+            const selectionActionContainer = containerEl.createDiv({ cls: 'logseqer-selection-action-settings' });
+            this.addSelectionActionModeSetting(selectionActionContainer, 'menu.addListMarkers', 'selectionListMode');
+            this.addSelectionActionModeSetting(selectionActionContainer, 'menu.hardBreaksToSoft', 'selectionHardToSoftMode');
+            this.addSelectionActionModeSetting(selectionActionContainer, 'menu.softBreaksToHard', 'selectionSoftToHardMode');
         }
 
         new Setting(containerEl)

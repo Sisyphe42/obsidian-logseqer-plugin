@@ -2,7 +2,7 @@
 
 ## Automated coverage
 
-- Action routing: master switch and `command` / `context-menu` / `both`
+- Action routing: master switch and `off` / `command` / `context-menu` / `both`
 - Editor adapter: replacement, undo origin, and retained selection
 - LF and CRLF line endings
 - Idempotent unordered-list conversion and empty-line handling
@@ -22,7 +22,7 @@ npm run build
 1. Select multiple paragraph lines in Source mode and Live Preview.
 2. Run each action from the context menu and command palette.
 3. Confirm the result notice reports the changed count or a no-op.
-4. Set each action to `Command only`, `Context menu only`, and `Command and context menu`; verify only the selected surfaces appear.
+4. Set each action to `Off`, `Command only`, `Context menu only`, and `Command and context menu`; verify only the selected surfaces appear.
 5. Disable the master switch and verify all three actions disappear.
 6. Enable Strict line breaks and confirm soft and hard breaks render differently.
 7. Undo each transform once and confirm the full selection reverts in one step.

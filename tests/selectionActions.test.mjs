@@ -53,6 +53,8 @@ test('action modes independently route commands and context menus', () => {
     assert.equal(isSelectionActionAvailable(true, 'both', 'context-menu'), true);
     assert.equal(isSelectionActionAvailable(true, 'command', 'context-menu'), false);
     assert.equal(isSelectionActionAvailable(true, 'context-menu', 'command'), false);
+    assert.equal(isSelectionActionAvailable(true, 'off', 'command'), false);
+    assert.equal(isSelectionActionAvailable(true, 'off', 'context-menu'), false);
     assert.equal(isSelectionActionAvailable(false, 'both', 'command'), false);
 });
 

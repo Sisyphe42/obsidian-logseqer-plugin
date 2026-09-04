@@ -81,6 +81,7 @@ const zhCN: Record<string, string> = {
     'settings.actionMode.command': '仅命令',
     'settings.actionMode.contextMenu': '仅右键菜单',
     'settings.actionMode.both': '命令和右键菜单',
+    'settings.actionMode.off': '关闭',
     'settings.deleteEmptyJournalsCommand': '命令：删除空日记文件',
     'settings.deleteEmptyJournalsCommandDesc': '在命令面板中显示"删除空日记文件"命令。',
     'settings.vaultCheckHeading': '仓库检查',

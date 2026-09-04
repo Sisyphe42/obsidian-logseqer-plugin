@@ -1,7 +1,7 @@
 import { getMarkdownContext, transformSelection } from './textTransforms.js';
 
 /** @typedef {'add-list-markers' | 'hard-breaks-to-soft' | 'soft-breaks-to-hard'} SelectionActionId */
-/** @typedef {'command' | 'context-menu' | 'both'} SelectionActionMode */
+/** @typedef {'off' | 'command' | 'context-menu' | 'both'} SelectionActionMode */
 /** @typedef {'command' | 'context-menu'} SelectionActionSurface */
 
 /**
