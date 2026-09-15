@@ -3,7 +3,7 @@
     "name": "Logseqer",
     "version": "0.10.0",
     "description": "Provides a Logseq-native experience and enhance workflow compatibility between both applications.",
-    "minAppVersion": "1.11.0",
+    "minAppVersion": "1.13.0",
     "author": "sisyphe42",
     "authorUrl": "https://github.com/Sisyphe42",
     "isDesktopOnly": false
