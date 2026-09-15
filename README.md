@@ -65,6 +65,7 @@ npm run build
 - **Selection Formatting**: Turn off each nested action or choose command, context menu, or both
 - **Folder Configuration**: Logseq and Obsidian folders (autocomplete available)
 - **Backlink Query**: Customize journal backlinks filter
+- **Automatic empty-journal cleanup**: Disabled by default; after creating a journal, move earlier empty journals to the Obsidian trash
 - **Restore Defaults**: Reset all settings to defaults
 
 ## License

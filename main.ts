@@ -2,6 +2,7 @@ import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, S
 import type { SettingDefinitionItem } from 'obsidian';
 import { checkLogseqSyntaxDOM } from './logseqSyntax';
 import { applySelectionAction, isSelectionActionAvailable } from './selectionActions';
+import { isEarlierJournalFile, isEmptyJournalContent } from './journalCleanup.js';
 import zhCN from './i18n/zh-CN';
 import en from './i18n/en';
 
@@ -72,6 +73,7 @@ interface LogseqerSettings {
     enableVaultCommand?: boolean;
     enableSyncCommand?: boolean;
     enableDeleteEmptyJournalsCommand?: boolean;
+    enableAutoDeleteEmptyJournals?: boolean;
     enableVaultDateCheck?: boolean;
     enableVaultNamespaceCheck?: boolean;
     enableVaultTaskMarkerCheck?: boolean;
@@ -94,6 +96,7 @@ const DEFAULT_SETTINGS: LogseqerSettings = {
     enableVaultCommand: true,
     enableSyncCommand: true,
     enableDeleteEmptyJournalsCommand: true,
+    enableAutoDeleteEmptyJournals: false,
     enableVaultDateCheck: true,
     enableVaultNamespaceCheck: true,
     enableVaultTaskMarkerCheck: true,
@@ -202,26 +205,30 @@ export default class LogseqerPlugin extends Plugin {
         }
 
         // 5. Feature: Journal
-        // New Journal automatically add "- "
+        // Format a new journal, then optionally clean up older empty journals.
         this.registerEvent(
             this.app.vault.on('create', async (file) => {
-                if (!this.settings.enableJournalNew) return;
+                if (!this.settings.enableJournalNew && !this.settings.enableAutoDeleteEmptyJournals) return;
 
                 // Get configured journal folder or default
                 const journalFolder = this.getDailyNoteFolder();
 
                 if (file instanceof TFile && file.path.startsWith(journalFolder + '/')) {
-                    // Delay slightly to ensure file is ready?
-                    // Read and modify
-                    try {
-                        await this.app.vault.process(file, (data) => {
-                            if (!data.startsWith("- ")) {
-                                return "- " + data;
-                            }
-                            return data;
-                        });
-                    } catch (e) {
-                        console.warn("Logseqer: Failed to process journal file", e);
+                    if (this.settings.enableJournalNew) {
+                        try {
+                            await this.app.vault.process(file, (data) => {
+                                if (!data.startsWith("- ")) {
+                                    return "- " + data;
+                                }
+                                return data;
+                            });
+                        } catch (e) {
+                            console.warn("Logseqer: Failed to process journal file", e);
+                        }
+                    }
+
+                    if (this.settings.enableAutoDeleteEmptyJournals) {
+                        await this.autoDeleteEmptyJournalsBefore(file);
                     }
                 }
             })
@@ -847,30 +854,57 @@ export default class LogseqerPlugin extends Plugin {
 
     // 5. Feature: Delete Empty Journals
     async deleteEmptyJournals() {
-        const journalFolder = this.getDailyNoteFolder();
-        const files = this.app.vault.getMarkdownFiles();
-        const emptyFiles: TFile[] = [];
-
-        for (const file of files) {
-            if (file.path.startsWith(journalFolder + '/')) {
-                try {
-                    const content = await this.app.vault.read(file);
-                    // Check if file contains only "- " (possibly with whitespace)
-                    const trimmed = content.trim();
-                    if (trimmed === '-' || trimmed === '- ') {
-                        emptyFiles.push(file);
-                    }
-                } catch (e) {
-                    console.warn('Logseqer: failed reading file for empty check', file.path, e);
-                }
-            }
-        }
+        const emptyFiles = await this.findEmptyJournalFiles();
 
         if (emptyFiles.length > 0) {
             new DeleteEmptyJournalsModal(this.app, this, emptyFiles).open();
         } else {
             this.notify('notice.noEmptyJournals');
         }
+    }
+
+    private async findEmptyJournalFiles(createdBefore?: TFile): Promise<TFile[]> {
+        const journalFolder = this.getDailyNoteFolder();
+        const emptyFiles: TFile[] = [];
+
+        for (const file of this.app.vault.getMarkdownFiles()) {
+            if (createdBefore) {
+                if (!isEarlierJournalFile(file, createdBefore, journalFolder)) continue;
+            } else if (!file.path.startsWith(journalFolder + '/')) {
+                continue;
+            }
+
+            try {
+                const content = await this.app.vault.read(file);
+                if (isEmptyJournalContent(content)) emptyFiles.push(file);
+            } catch (e) {
+                console.warn('Logseqer: failed reading file for empty check', file.path, e);
+            }
+        }
+
+        return emptyFiles;
+    }
+
+    private async autoDeleteEmptyJournalsBefore(currentJournal: TFile): Promise<void> {
+        const emptyFiles = await this.findEmptyJournalFiles(currentJournal);
+        if (emptyFiles.length === 0) return;
+
+        const deleted = await this.trashJournalFiles(emptyFiles);
+        if (deleted > 0) this.notify('notice.autoDeletedEmptyJournals', { count: deleted });
+    }
+
+    async trashJournalFiles(files: Iterable<TFile>): Promise<number> {
+        let deleted = 0;
+        for (const file of files) {
+            try {
+                await this.app.fileManager.trashFile(file);
+                deleted++;
+            } catch (e) {
+                console.warn('Logseqer: failed moving empty journal to trash', file.path, e);
+            }
+        }
+
+        return deleted;
     }
 
     // 6. Feature: Backlinks Customization
@@ -1093,10 +1127,8 @@ class DeleteEmptyJournalsModal extends Modal {
         const confirmBtn = rightDiv.createEl('button', { text: this.tr('modal.confirm'), cls: 'mod-cta' });
         confirmBtn.onclick = async () => {
             try {
-                for (const file of this.selectedFiles) {
-                    await this.app.fileManager.trashFile(file);
-                }
-                this.notify('notice.deletedEmptyJournals', { count: this.selectedFiles.size });
+                const deleted = await this.plugin.trashJournalFiles(this.selectedFiles);
+                this.notify('notice.deletedEmptyJournals', { count: deleted });
                 this.close();
             } catch (e) {
                 console.error('Logseqer: Error deleting empty journals', e);
@@ -1350,6 +1382,11 @@ class LogseqerSettingTab extends PluginSettingTab {
                         desc: this.plugin.tr('settings.deleteEmptyJournalsCommandDesc'),
                         control: { type: 'toggle', key: 'enableDeleteEmptyJournalsCommand', defaultValue: true },
                     },
+                    {
+                        name: this.plugin.tr('settings.autoDeleteEmptyJournals'),
+                        desc: this.plugin.tr('settings.autoDeleteEmptyJournalsDesc'),
+                        control: { type: 'toggle', key: 'enableAutoDeleteEmptyJournals', defaultValue: false },
+                    },
                 ],
             },
             {
@@ -1503,6 +1540,7 @@ class LogseqerSettingTab extends PluginSettingTab {
             case 'enableVaultCommand':
             case 'enableSyncCommand':
             case 'enableDeleteEmptyJournalsCommand':
+            case 'enableAutoDeleteEmptyJournals':
             case 'enableVaultDateCheck':
             case 'enableVaultNamespaceCheck':
             case 'enableVaultTaskMarkerCheck':
@@ -1606,6 +1644,16 @@ class LogseqerSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.enableDeleteEmptyJournalsCommand ?? true)
                 .onChange(async (value) => {
                     this.plugin.settings.enableDeleteEmptyJournalsCommand = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(this.plugin.tr('settings.autoDeleteEmptyJournals'))
+            .setDesc(this.plugin.tr('settings.autoDeleteEmptyJournalsDesc'))
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableAutoDeleteEmptyJournals ?? false)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableAutoDeleteEmptyJournals = value;
                     await this.plugin.saveSettings();
                 }));
 
