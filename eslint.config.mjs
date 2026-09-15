@@ -28,6 +28,8 @@ export default [
       "obsidianmd/no-static-styles-assignment": "warn",
       "obsidianmd/hardcoded-config-path": "warn",
       "obsidianmd/commands/no-plugin-id-in-command-id": "warn",
+      "obsidianmd/prefer-create-el": "warn",
+      "obsidianmd/settings-tab/prefer-setting-definitions": "warn",
       "obsidianmd/no-sample-code": "off",
       
       // TypeScript rules
@@ -35,6 +37,11 @@ export default [
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-empty-function": "warn",
       "@typescript-eslint/no-non-null-assertion": "warn",
+      "@typescript-eslint/no-unsafe-call": "warn",
+      "@typescript-eslint/no-unsafe-member-access": "warn",
+      "@typescript-eslint/no-unsafe-assignment": "warn",
+      "@typescript-eslint/no-unsafe-argument": "warn",
+      "@typescript-eslint/no-unnecessary-type-assertion": "warn",
     },
   },
 ];

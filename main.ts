@@ -1,4 +1,5 @@
 import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Setting, Modal, App, TextComponent, TFolder, TAbstractFile, Component, Editor, getLanguage } from 'obsidian';
+import type { SettingDefinitionItem } from 'obsidian';
 import { checkLogseqSyntaxDOM } from './logseqSyntax';
 import { applySelectionAction, isSelectionActionAvailable } from './selectionActions';
 import zhCN from './i18n/zh-CN';
@@ -33,10 +34,11 @@ function t(locale: SupportedLocale, key: string, vars?: Record<string, string | 
 
 // Utility function for setting element styles (centralized for Obsidian best practices)
 function setElementStyles(el: HTMLElement, styles: Record<string, string>): void {
-    Object.entries(styles).forEach(([key, value]) => {
+    for (const key in styles) {
+        const value = styles[key];
         const cssKey = key.replace(/([A-Z])/g, '-$1').toLowerCase();
         el.style.setProperty(cssKey, value);
-    });
+    }
 }
 
 // Interface for settings can be added here
@@ -1021,8 +1023,8 @@ class DeleteEmptyJournalsModal extends Modal {
         this.plugin = plugin;
         this.emptyFiles = emptyFiles;
         this.selectedFiles = new Set(emptyFiles);
-        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
-        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
+        this.tr = (key, vars) => plugin.tr(key, vars);
+        this.notify = (key, vars) => plugin.notify(key, vars);
     }
 
     onOpen() {
@@ -1280,6 +1282,241 @@ class LogseqerSettingTab extends PluginSettingTab {
     constructor(app: App, plugin: LogseqerPlugin) {
         super(app, plugin);
         this.plugin = plugin;
+    }
+
+    getSettingDefinitions(): SettingDefinitionItem[] {
+        const actionModeOptions = {
+            off: this.plugin.tr('settings.actionMode.off'),
+            command: this.plugin.tr('settings.actionMode.command'),
+            'context-menu': this.plugin.tr('settings.actionMode.contextMenu'),
+            both: this.plugin.tr('settings.actionMode.both'),
+        };
+
+        return [
+            {
+                type: 'group',
+                heading: this.plugin.tr('settings.general'),
+                items: [{
+                    name: `🌐 ${this.plugin.tr('settings.language')}`,
+                    desc: this.plugin.tr('settings.languageDesc'),
+                    control: {
+                        type: 'dropdown',
+                        key: 'locale',
+                        defaultValue: 'auto',
+                        options: {
+                            auto: this.plugin.tr('settings.language.auto'),
+                            'zh-CN': this.plugin.tr('settings.language.zhCN'),
+                            en: this.plugin.tr('settings.language.en'),
+                        },
+                    },
+                }],
+            },
+            {
+                type: 'group',
+                heading: this.plugin.tr('settings.logseqFormatting'),
+                items: [
+                    {
+                        name: this.plugin.tr('settings.syntaxCheck'),
+                        desc: this.plugin.tr('settings.syntaxCheckDesc'),
+                        control: { type: 'toggle', key: 'enableSyntaxCheck', defaultValue: true },
+                    },
+                    {
+                        name: this.plugin.tr('settings.newJournalFormat'),
+                        desc: this.plugin.tr('settings.newJournalFormatDesc'),
+                        control: { type: 'toggle', key: 'enableJournalNew', defaultValue: true },
+                    },
+                    {
+                        name: this.plugin.tr('settings.selectionActions'),
+                        desc: this.plugin.tr('settings.selectionActionsDesc'),
+                        control: { type: 'toggle', key: 'enableSelectionActions', defaultValue: true },
+                    },
+                    {
+                        name: this.plugin.tr('menu.addListMarkers'),
+                        visible: () => this.plugin.settings.enableSelectionActions,
+                        control: { type: 'dropdown', key: 'selectionListMode', defaultValue: 'both', options: actionModeOptions },
+                    },
+                    {
+                        name: this.plugin.tr('menu.hardBreaksToSoft'),
+                        visible: () => this.plugin.settings.enableSelectionActions,
+                        control: { type: 'dropdown', key: 'selectionHardToSoftMode', defaultValue: 'both', options: actionModeOptions },
+                    },
+                    {
+                        name: this.plugin.tr('menu.softBreaksToHard'),
+                        visible: () => this.plugin.settings.enableSelectionActions,
+                        control: { type: 'dropdown', key: 'selectionSoftToHardMode', defaultValue: 'both', options: actionModeOptions },
+                    },
+                    {
+                        name: this.plugin.tr('settings.deleteEmptyJournalsCommand'),
+                        desc: this.plugin.tr('settings.deleteEmptyJournalsCommandDesc'),
+                        control: { type: 'toggle', key: 'enableDeleteEmptyJournalsCommand', defaultValue: true },
+                    },
+                ],
+            },
+            {
+                type: 'group',
+                heading: this.plugin.tr('settings.vaultCheckHeading'),
+                items: [
+                    {
+                        name: this.plugin.tr('settings.vaultCheckCommand'),
+                        desc: this.plugin.tr('settings.vaultCheckCommandDesc'),
+                        control: { type: 'toggle', key: 'enableVaultCommand', defaultValue: true },
+                    },
+                    {
+                        name: this.plugin.tr('settings.dateFormatCheck'),
+                        desc: this.plugin.tr('settings.dateFormatCheckDesc'),
+                        control: { type: 'toggle', key: 'enableVaultDateCheck', defaultValue: true, disabled: () => !this.plugin.settings.enableVaultCommand },
+                    },
+                    {
+                        name: this.plugin.tr('settings.folderSettingsCheck'),
+                        desc: this.plugin.tr('settings.folderSettingsCheckDesc'),
+                        control: { type: 'toggle', key: 'enableVaultFolderSettingsCheck', defaultValue: true, disabled: () => !this.plugin.settings.enableVaultCommand },
+                    },
+                    {
+                        name: this.plugin.tr('settings.namespaceChecks'),
+                        desc: this.plugin.tr('settings.namespaceChecksDesc'),
+                        control: { type: 'toggle', key: 'enableVaultNamespaceCheck', defaultValue: true, disabled: () => !this.plugin.settings.enableVaultCommand },
+                    },
+                    {
+                        name: this.plugin.tr('settings.taskMarkerChecks'),
+                        desc: this.plugin.tr('settings.taskMarkerChecksDesc'),
+                        control: { type: 'toggle', key: 'enableVaultTaskMarkerCheck', defaultValue: true, disabled: () => !this.plugin.settings.enableVaultCommand },
+                    },
+                ],
+            },
+            {
+                type: 'group',
+                heading: this.plugin.tr('settings.bookmarkSyncHeading'),
+                items: [
+                    {
+                        name: this.plugin.tr('settings.syncSettingsCommand'),
+                        desc: this.plugin.tr('settings.syncSettingsCommandDesc'),
+                        control: { type: 'toggle', key: 'enableSyncCommand', defaultValue: true },
+                    },
+                    {
+                        name: this.plugin.tr('settings.syncDirection'),
+                        desc: this.plugin.tr('settings.syncDirectionDesc'),
+                        control: {
+                            type: 'dropdown',
+                            key: 'bookmarkSyncDirection',
+                            defaultValue: 'obsidian-to-logseq',
+                            options: {
+                                'obsidian-to-logseq': this.plugin.tr('modal.syncDirection.obsidianToLogseq'),
+                                'logseq-to-obsidian': this.plugin.tr('modal.syncDirection.logseqToObsidian'),
+                                bidirectional: this.plugin.tr('settings.syncDirection.bidirectional'),
+                            },
+                        },
+                    },
+                    {
+                        name: this.plugin.tr('settings.logseqFolder'),
+                        desc: this.plugin.tr('settings.logseqFolderDesc'),
+                        control: { type: 'folder', key: 'logseqFolder', defaultValue: 'logseq' },
+                    },
+                ],
+            },
+            {
+                type: 'group',
+                heading: this.plugin.tr('settings.backlinksHeading'),
+                items: [
+                    {
+                        name: this.plugin.tr('settings.backlinkDefaultQuery'),
+                        desc: this.plugin.tr('settings.backlinkDefaultQueryDesc'),
+                        control: { type: 'toggle', key: 'enableBacklinkQuery', defaultValue: true },
+                    },
+                    {
+                        name: this.plugin.tr('settings.defaultQuery'),
+                        desc: this.plugin.tr('settings.defaultQueryDesc'),
+                        control: { type: 'text', key: 'backlinkQueryString', defaultValue: '' },
+                    },
+                ],
+            },
+            {
+                type: 'group',
+                heading: this.plugin.tr('settings.advanced'),
+                items: [
+                    {
+                        name: this.plugin.tr('settings.restoreDefaults'),
+                        desc: this.plugin.tr('settings.restoreDefaultsDesc'),
+                        render: setting => {
+                            setting.addButton(button => button
+                                .setButtonText(this.plugin.tr('settings.restoreDefaultsBtn'))
+                                .setWarning()
+                                .onClick(() => {
+                                    new CustomConfirmationModal(this.app, this.plugin.tr('settings.restoreDefaultsConfirm'), () => {
+                                        void (async () => {
+                                            this.plugin.settings = { ...DEFAULT_SETTINGS };
+                                            await this.plugin.saveSettings();
+                                            this.update();
+                                            this.plugin.notify('notice.settingsRestored');
+                                        })();
+                                    }, this.plugin).open();
+                                }));
+                        },
+                    },
+                    {
+                        name: this.plugin.tr('settings.devMode'),
+                        desc: this.plugin.tr('settings.devModeDesc'),
+                        render: setting => {
+                            setting.addButton(button => button
+                                .setButtonText(this.plugin.tr(this.plugin.settings.developerMode ? 'settings.disable' : 'settings.enable'))
+                                .setWarning()
+                                .onClick(async () => {
+                                    this.plugin.settings.developerMode = !this.plugin.settings.developerMode;
+                                    await this.plugin.saveSettings();
+                                    if (this.plugin.settings.developerMode) this.plugin.createDevButton();
+                                    else this.plugin.removeDevButton();
+                                    this.update();
+                                }));
+                        },
+                    },
+                ],
+            },
+        ];
+    }
+
+    async setControlValue(key: string, value: unknown): Promise<void> {
+        switch (key) {
+            case 'locale':
+                if (value !== 'auto' && value !== 'zh-CN' && value !== 'en') return;
+                this.plugin.settings.locale = value;
+                this.plugin.locale = resolveLocale(value, getLanguage());
+                break;
+            case 'selectionListMode':
+            case 'selectionHardToSoftMode':
+            case 'selectionSoftToHardMode':
+                if (value !== 'off' && value !== 'command' && value !== 'context-menu' && value !== 'both') return;
+                this.plugin.settings[key] = value;
+                break;
+            case 'bookmarkSyncDirection':
+                if (value !== 'obsidian-to-logseq' && value !== 'logseq-to-obsidian' && value !== 'bidirectional') return;
+                this.plugin.settings.bookmarkSyncDirection = value;
+                break;
+            case 'logseqFolder':
+            case 'backlinkQueryString':
+                if (typeof value !== 'string') return;
+                this.plugin.settings[key] = value;
+                break;
+            case 'enableSyntaxCheck':
+            case 'enableJournalNew':
+            case 'enableSelectionActions':
+            case 'enableBacklinkQuery':
+            case 'developerMode':
+            case 'enableVaultCommand':
+            case 'enableSyncCommand':
+            case 'enableDeleteEmptyJournalsCommand':
+            case 'enableVaultDateCheck':
+            case 'enableVaultNamespaceCheck':
+            case 'enableVaultTaskMarkerCheck':
+            case 'enableVaultFolderSettingsCheck':
+                if (typeof value !== 'boolean') return;
+                this.plugin.settings[key] = value;
+                break;
+            default:
+                return;
+        }
+
+        await this.plugin.saveSettings();
+        if (key === 'enableSyntaxCheck') this.plugin.updateSyntaxCheck();
+        if (key === 'locale') this.update();
     }
 
     private addSelectionActionModeSetting(containerEl: HTMLElement, labelKey: string, settingKey: 'selectionListMode' | 'selectionHardToSoftMode' | 'selectionSoftToHardMode'): void {
@@ -1594,8 +1831,8 @@ class BookmarkSyncModal extends Modal {
         this.canModifyObsidian = canModifyObsidian;
         this.canModifyLogseq = canModifyLogseq;
         this.direction = direction;
-        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
-        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
+        this.tr = (key, vars) => plugin.tr(key, vars);
+        this.notify = (key, vars) => plugin.notify(key, vars);
         
         // Default view based on direction
         this.currentView = direction === 'logseq-to-obsidian' ? 'logseq' : 'obsidian';
@@ -1924,8 +2161,8 @@ class SyncResolutionModal extends Modal {
         this.ambiguousPages = ambiguousPages;
         this.bookmarkPath = bookmarkPath;
         this.simulation = !!simulation;
-        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
-        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
+        this.tr = (key, vars) => plugin.tr(key, vars);
+        this.notify = (key, vars) => plugin.notify(key, vars);
 
         this.selectedMissing = new Set(missingPages);
         this.selectedAmbiguous = new Map();
@@ -2118,8 +2355,8 @@ class VaultCheckResolutionModal extends Modal {
         this.selectedIssues = new Set(issues.filter(i => i.fixData !== null));
         this.simulation = !!simulation;
         this.components = [];
-        this.tr = plugin.tr.bind(plugin) as typeof plugin.tr;
-        this.notify = plugin.notify.bind(plugin) as typeof plugin.notify;
+        this.tr = (key, vars) => plugin.tr(key, vars);
+        this.notify = (key, vars) => plugin.notify(key, vars);
     }
 
     onOpen() {
@@ -2184,7 +2421,7 @@ class VaultCheckResolutionModal extends Modal {
                     pathDiv.setText(issue.description);
                 }
                 
-                infoDiv.createEl('div', { text: issue.suggestedFix, cls: 'logseqer-issue-fix' });
+                infoDiv.createDiv({ text: issue.suggestedFix, cls: 'logseqer-issue-fix' });
 
                 if (issue.fixData) {
                     const controlDiv = item.createDiv({ cls: 'logseqer-sync-item-control' });
