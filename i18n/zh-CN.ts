@@ -107,7 +107,7 @@ const zhCN: Record<string, string> = {
     'settings.backlinkDefaultQuery': '反向链接默认查询',
     'settings.backlinkDefaultQueryDesc': '为日记自动设置反向链接搜索条件。',
     'settings.defaultQuery': '默认查询',
-    'settings.defaultQueryDesc': '输入到反向链接搜索框的查询字符串。例如：-path:"journals/Journaling"',
+    'settings.defaultQueryDesc': '输入到反向链接搜索框的查询字符串。',
     'settings.advanced': '高级',
     'settings.restoreDefaults': '恢复默认',
     'settings.restoreDefaultsDesc': '将所有插件设置恢复为默认值',

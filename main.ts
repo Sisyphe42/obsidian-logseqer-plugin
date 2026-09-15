@@ -86,7 +86,7 @@ const DEFAULT_SETTINGS: LogseqerSettings = {
     selectionHardToSoftMode: 'both',
     selectionSoftToHardMode: 'both',
     enableBacklinkQuery: true,
-    backlinkQueryString: '-path:"journals/Journaling"',
+    backlinkQueryString: '',
     logseqFolder: 'logseq',
     developerMode: false,
     enableVaultCommand: true,
@@ -875,6 +875,7 @@ export default class LogseqerPlugin extends Plugin {
     // Custom "journals/*" backlinks default query (now uses dynamic folder)
     updateBacklinkQuery(leaf?: WorkspaceLeaf | null) {
         if (!this.settings.enableBacklinkQuery) return;
+        if (!this.settings.backlinkQueryString.trim()) return;
 
         // If no leaf provided (e.g. file-open), get the active one
         if (!leaf) {
@@ -1501,7 +1502,6 @@ class LogseqerSettingTab extends PluginSettingTab {
             .setName(this.plugin.tr('settings.defaultQuery'))
             .setDesc(this.plugin.tr('settings.defaultQueryDesc'))
             .addText(text => text
-                .setPlaceholder('-path:"journals/Journaling"')
                 .setValue(this.plugin.settings.backlinkQueryString)
                 .onChange(async (value) => {
                     this.plugin.settings.backlinkQueryString = value;

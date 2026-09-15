@@ -70,3 +70,7 @@ npm run build
 ## 许可证
 
 MIT
+
+## 致谢
+
+[Obsidian Journaling Plugin](https://github.com/Ordeeper/obsidian-journaling-plugin)

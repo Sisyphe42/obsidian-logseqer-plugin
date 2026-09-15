@@ -107,7 +107,7 @@ const en: Record<string, string> = {
     'settings.backlinkDefaultQuery': 'Backlink default query',
     'settings.backlinkDefaultQueryDesc': 'Automatically set a search query in backlinks for journals.',
     'settings.defaultQuery': 'Default query',
-    'settings.defaultQueryDesc': 'The query string to input into the backlinks search box. Example: -path:"journals/Journaling"',
+    'settings.defaultQueryDesc': 'The query string to input into the backlinks search box.',
     'settings.advanced': 'Advanced',
     'settings.restoreDefaults': 'Restore defaults',
     'settings.restoreDefaultsDesc': 'Reset all plugin settings to their default values',
