@@ -7,6 +7,7 @@
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+        "lint": "eslint main.ts journalCleanup.ts selectionActions.js textTransforms.js --max-warnings=0",
         "test": "node esbuild.test.config.mjs && node --test tests/*.test.mjs",
         "version": "node version-bump.mjs && git add manifest.json versions.json"
     },

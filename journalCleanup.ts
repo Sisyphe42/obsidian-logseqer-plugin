@@ -1,5 +1,11 @@
 type JournalDateToken = 'YYYY' | 'MM' | 'DD';
 
+interface LocalDateSource {
+    getFullYear(): number;
+    getMonth(): number;
+    getDate(): number;
+}
+
 const JOURNAL_DATE_TOKENS: readonly JournalDateToken[] = ['YYYY', 'MM', 'DD'];
 
 /** Treat the Logseq list marker inserted into a journal as empty content. */
@@ -54,18 +60,29 @@ export function parseJournalDate(relativePath: string, journalFormat: string): s
     if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
     if (month < 1 || month > 12 || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
 
-    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    return `${formatFourDigitYear(year)}-${formatTwoDigit(month)}-${formatTwoDigit(day)}`;
 }
 
 function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function getLocalDateKey(date: Date): string {
+function formatTwoDigit(value: number): string {
+    return value < 10 ? `0${value}` : `${value}`;
+}
+
+function formatFourDigitYear(value: number): string {
+    if (value < 10) return `000${value}`;
+    if (value < 100) return `00${value}`;
+    if (value < 1000) return `0${value}`;
+    return `${value}`;
+}
+
+export function getLocalDateKey(date: LocalDateSource): string {
     const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    return `${formatFourDigitYear(year)}-${formatTwoDigit(month)}-${formatTwoDigit(day)}`;
 }
 
 /** Limit automatic cleanup to valid journal files dated before today. */
