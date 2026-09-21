@@ -1,4 +1,5 @@
 node_modules
 main.js
+.test-dist
 data.json
 opencode.json

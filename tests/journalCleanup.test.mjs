@@ -7,7 +7,7 @@ import {
     isEmptyJournalContent,
     parseJournalDate,
     shouldRunDailyCleanup,
-} from '../journalCleanup.js';
+} from '../.test-dist/journalCleanup.js';
 
 test('empty journals contain only the Logseq list marker and whitespace', () => {
     assert.equal(isEmptyJournalContent('- '), true);

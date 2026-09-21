@@ -5,10 +5,10 @@ import obsidianPlugin from "eslint-plugin-obsidianmd";
 
 export default [
   {
-    ignores: ["node_modules/**", "dist/**", "esbuild.config.mjs"],
+    ignores: ["node_modules/**", "dist/**", ".test-dist/**", "esbuild.config.mjs", "esbuild.test.config.mjs"],
   },
   {
-    files: ["**/*.ts", "journalCleanup.js", "selectionActions.js", "textTransforms.js"],
+    files: ["**/*.ts", "selectionActions.js", "textTransforms.js"],
     languageOptions: {
       parser: tsparser,
       parserOptions: { 

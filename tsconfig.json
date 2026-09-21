@@ -18,7 +18,6 @@
     },
     "include": [
         "**/*.ts",
-        "journalCleanup.js",
         "selectionActions.js",
         "textTransforms.js"
     ]
