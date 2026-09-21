@@ -1,13 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isEarlierJournalFile, isEmptyJournalContent, shouldRunDailyCleanup } from '../journalCleanup.js';
+import {
+    getLocalDateKey,
+    isEarlierJournalFile,
+    isEmptyJournalContent,
+    parseJournalDate,
+    shouldRunDailyCleanup,
+} from '../journalCleanup.js';
 
 test('empty journals contain only the Logseq list marker and whitespace', () => {
     assert.equal(isEmptyJournalContent('- '), true);
     assert.equal(isEmptyJournalContent('\n  -  \n'), true);
     assert.equal(isEmptyJournalContent(''), false);
     assert.equal(isEmptyJournalContent('- note'), false);
+});
+
+test('journal dates are parsed from safe daily-note formats', () => {
+    assert.equal(parseJournalDate('2026_09_21', 'YYYY_MM_DD'), '2026-09-21');
+    assert.equal(parseJournalDate('archive/2026-09-21', '[archive]/YYYY-MM-DD'), '2026-09-21');
+    assert.equal(parseJournalDate('2026_02_29', 'YYYY_MM_DD'), null);
+    assert.equal(parseJournalDate('21_09_2026', 'DD_MM_YYYY'), '2026-09-21');
+    assert.equal(parseJournalDate('Sep 21, 2026', 'MMM D, YYYY'), null);
+});
+
+test('local date keys do not depend on UTC conversion', () => {
+    assert.equal(getLocalDateKey(new Date(2026, 8, 21, 0, 5)), '2026-09-21');
 });
 
 test('automatic cleanup selects only journals dated before today', () => {

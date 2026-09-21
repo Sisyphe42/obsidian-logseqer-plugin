@@ -1,8 +1,8 @@
-import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Modal, App, TFolder, TAbstractFile, Component, Editor, getLanguage, moment } from 'obsidian';
+import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Modal, App, TFolder, TAbstractFile, Component, Editor, getLanguage } from 'obsidian';
 import type { SettingDefinitionItem } from 'obsidian';
 import { checkLogseqSyntaxDOM } from './logseqSyntax';
 import { applySelectionAction, isSelectionActionAvailable } from './selectionActions';
-import { isEarlierJournalFile, isEmptyJournalContent, shouldRunDailyCleanup } from './journalCleanup.js';
+import { getLocalDateKey, isEarlierJournalFile, isEmptyJournalContent, parseJournalDate, shouldRunDailyCleanup } from './journalCleanup.js';
 import zhCN from './i18n/zh-CN';
 import en from './i18n/en';
 
@@ -898,8 +898,7 @@ export default class LogseqerPlugin extends Plugin {
                 const relativePath = file.path.startsWith(`${journalFolder}/`)
                     ? file.path.slice(journalFolder.length + 1).replace(/\.md$/i, '')
                     : '';
-                const parsedDate = moment(relativePath, journalFormat, true);
-                const journalDate = parsedDate.isValid() ? parsedDate.format('YYYY-MM-DD') : null;
+                const journalDate = parseJournalDate(relativePath, journalFormat);
                 if (!isEarlierJournalFile(file, journalFolder, journalDate, cleanupBeforeDate, activeFilePath)) continue;
             } else if (!file.path.startsWith(journalFolder + '/')) {
                 continue;
@@ -919,7 +918,7 @@ export default class LogseqerPlugin extends Plugin {
     async runDailyJournalCleanup(): Promise<void> {
         if (!this.settings.enableAutoDeleteEmptyJournals) return;
 
-        const todayDate = moment().format('YYYY-MM-DD');
+        const todayDate = getLocalDateKey(new Date());
         if (!shouldRunDailyCleanup(this.settings.lastAutoDeleteEmptyJournalsDate, todayDate)) return;
 
         // Persist the attempt before scanning so reloads or concurrent timers cannot
