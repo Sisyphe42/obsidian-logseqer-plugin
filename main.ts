@@ -1,8 +1,8 @@
-import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Modal, App, TFolder, TAbstractFile, Component, Editor, getLanguage } from 'obsidian';
+import { Plugin, WorkspaceLeaf, MarkdownView, Notice, TFile, PluginSettingTab, Modal, App, TFolder, TAbstractFile, Component, Editor, getLanguage, moment } from 'obsidian';
 import type { SettingDefinitionItem } from 'obsidian';
 import { checkLogseqSyntaxDOM } from './logseqSyntax';
 import { applySelectionAction, isSelectionActionAvailable } from './selectionActions';
-import { isEarlierJournalFile, isEmptyJournalContent } from './journalCleanup.js';
+import { isEarlierJournalFile, isEmptyJournalContent, shouldRunDailyCleanup } from './journalCleanup.js';
 import zhCN from './i18n/zh-CN';
 import en from './i18n/en';
 
@@ -74,6 +74,7 @@ interface LogseqerSettings {
     enableSyncCommand?: boolean;
     enableDeleteEmptyJournalsCommand?: boolean;
     enableAutoDeleteEmptyJournals?: boolean;
+    lastAutoDeleteEmptyJournalsDate?: string;
     enableVaultDateCheck?: boolean;
     enableVaultNamespaceCheck?: boolean;
     enableVaultTaskMarkerCheck?: boolean;
@@ -205,34 +206,37 @@ export default class LogseqerPlugin extends Plugin {
         }
 
         // 5. Feature: Journal
-        // Format a new journal, then optionally clean up older empty journals.
+        // Format newly created journals. Cleanup is intentionally independent
+        // from file creation so creating a historical journal never triggers it.
         this.registerEvent(
             this.app.vault.on('create', async (file) => {
-                if (!this.settings.enableJournalNew && !this.settings.enableAutoDeleteEmptyJournals) return;
+                if (!this.settings.enableJournalNew) return;
 
                 // Get configured journal folder or default
                 const journalFolder = this.getDailyNoteFolder();
 
                 if (file instanceof TFile && file.path.startsWith(journalFolder + '/')) {
-                    if (this.settings.enableJournalNew) {
-                        try {
-                            await this.app.vault.process(file, (data) => {
-                                if (!data.startsWith("- ")) {
-                                    return "- " + data;
-                                }
-                                return data;
-                            });
-                        } catch (e) {
-                            console.warn("Logseqer: Failed to process journal file", e);
-                        }
-                    }
-
-                    if (this.settings.enableAutoDeleteEmptyJournals) {
-                        await this.autoDeleteEmptyJournalsBefore(file);
+                    try {
+                        await this.app.vault.process(file, (data) => {
+                            if (!data.startsWith("- ")) {
+                                return "- " + data;
+                            }
+                            return data;
+                        });
+                    } catch (e) {
+                        console.warn("Logseqer: Failed to process journal file", e);
                     }
                 }
             })
         );
+
+        const runDailyJournalCleanup = () => {
+            void this.runDailyJournalCleanup().catch(e => {
+                console.warn('Logseqer: automatic journal cleanup failed', e);
+            });
+        };
+        this.app.workspace.onLayoutReady(runDailyJournalCleanup);
+        this.registerInterval(window.setInterval(runDailyJournalCleanup, 60 * 60 * 1000));
     }
 
     onunload() {
@@ -314,6 +318,27 @@ export default class LogseqerPlugin extends Plugin {
             console.warn("Logseqer: Could not retrieve Daily Notes Settings, falling back to 'journals'", error);
         }
         return 'journals';
+    }
+
+    getDailyNoteFormat(): string {
+        try {
+            const internalPlugins = (this.app as unknown as Record<string, unknown>).internalPlugins;
+            if (typeof internalPlugins === 'object' && internalPlugins !== null && 'getPluginById' in internalPlugins) {
+                const dailyNotesPlugin = (internalPlugins as Record<string, (id: string) => unknown>).getPluginById('daily-notes');
+                if (typeof dailyNotesPlugin === 'object' && dailyNotesPlugin !== null && 'instance' in dailyNotesPlugin) {
+                    const instance = (dailyNotesPlugin as Record<string, unknown>).instance;
+                    if (typeof instance === 'object' && instance !== null && 'options' in instance) {
+                        const options = (instance as Record<string, unknown>).options;
+                        if (typeof options === 'object' && options !== null && 'format' in options) {
+                            return (options as Record<string, string>).format || 'YYYY-MM-DD';
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn("Logseqer: Could not retrieve Daily Notes format, falling back to 'YYYY-MM-DD'", error);
+        }
+        return 'YYYY-MM-DD';
     }
 
     // Helper: Determine pages folder - prefer a folder named 'pages' if present
@@ -863,13 +888,19 @@ export default class LogseqerPlugin extends Plugin {
         }
     }
 
-    private async findEmptyJournalFiles(createdBefore?: TFile): Promise<TFile[]> {
+    private async findEmptyJournalFiles(cleanupBeforeDate?: string, activeFilePath: string | null = null): Promise<TFile[]> {
         const journalFolder = this.getDailyNoteFolder();
+        const journalFormat = this.getDailyNoteFormat();
         const emptyFiles: TFile[] = [];
 
         for (const file of this.app.vault.getMarkdownFiles()) {
-            if (createdBefore) {
-                if (!isEarlierJournalFile(file, createdBefore, journalFolder)) continue;
+            if (cleanupBeforeDate) {
+                const relativePath = file.path.startsWith(`${journalFolder}/`)
+                    ? file.path.slice(journalFolder.length + 1).replace(/\.md$/i, '')
+                    : '';
+                const parsedDate = moment(relativePath, journalFormat, true);
+                const journalDate = parsedDate.isValid() ? parsedDate.format('YYYY-MM-DD') : null;
+                if (!isEarlierJournalFile(file, journalFolder, journalDate, cleanupBeforeDate, activeFilePath)) continue;
             } else if (!file.path.startsWith(journalFolder + '/')) {
                 continue;
             }
@@ -885,8 +916,19 @@ export default class LogseqerPlugin extends Plugin {
         return emptyFiles;
     }
 
-    private async autoDeleteEmptyJournalsBefore(currentJournal: TFile): Promise<void> {
-        const emptyFiles = await this.findEmptyJournalFiles(currentJournal);
+    async runDailyJournalCleanup(): Promise<void> {
+        if (!this.settings.enableAutoDeleteEmptyJournals) return;
+
+        const todayDate = moment().format('YYYY-MM-DD');
+        if (!shouldRunDailyCleanup(this.settings.lastAutoDeleteEmptyJournalsDate, todayDate)) return;
+
+        // Persist the attempt before scanning so reloads or concurrent timers cannot
+        // launch a second destructive pass on the same calendar day.
+        this.settings.lastAutoDeleteEmptyJournalsDate = todayDate;
+        await this.saveSettings();
+
+        const activeFilePath = this.app.workspace.getActiveFile()?.path ?? null;
+        const emptyFiles = await this.findEmptyJournalFiles(todayDate, activeFilePath);
         if (emptyFiles.length === 0) return;
 
         const deleted = await this.trashJournalFiles(emptyFiles);
