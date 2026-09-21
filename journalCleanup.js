@@ -1,3 +1,7 @@
+// @ts-check
+
+/** @typedef {'YYYY' | 'MM' | 'DD'} JournalDateToken */
+
 /**
  * Treat the Logseq list marker inserted into a journal as empty content.
  *
@@ -18,11 +22,14 @@ export function isEmptyJournalContent(content) {
  * @returns {string | null} ISO local date
  */
 export function parseJournalDate(relativePath, journalFormat) {
+    /** @type {JournalDateToken[]} */
     const tokens = [];
     let pattern = '^';
 
     for (let index = 0; index < journalFormat.length;) {
-        const token = ['YYYY', 'MM', 'DD'].find(candidate => journalFormat.startsWith(candidate, index));
+        /** @type {JournalDateToken | undefined} */
+        const token = /** @type {JournalDateToken[]} */ (['YYYY', 'MM', 'DD'])
+            .find(candidate => journalFormat.startsWith(candidate, index));
         if (token !== undefined) {
             if (tokens.includes(token)) return null;
             tokens.push(token);
@@ -49,7 +56,11 @@ export function parseJournalDate(relativePath, journalFormat) {
     const match = new RegExp(`${pattern}$`).exec(relativePath);
     if (match === null) return null;
 
-    const values = Object.fromEntries(tokens.map((token, index) => [token, Number(match[index + 1])]));
+    /** @type {Record<JournalDateToken, number>} */
+    const values = { YYYY: 0, MM: 0, DD: 0 };
+    tokens.forEach((token, index) => {
+        values[token] = Number(match[index + 1]);
+    });
     const year = values.YYYY;
     const month = values.MM;
     const day = values.DD;

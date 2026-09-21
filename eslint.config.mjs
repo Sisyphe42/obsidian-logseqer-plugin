@@ -8,7 +8,7 @@ export default [
     ignores: ["node_modules/**", "dist/**", "esbuild.config.mjs"],
   },
   {
-    files: ["**/*.ts"],
+    files: ["**/*.ts", "journalCleanup.js", "selectionActions.js", "textTransforms.js"],
     languageOptions: {
       parser: tsparser,
       parserOptions: { 
